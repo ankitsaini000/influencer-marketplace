@@ -1,229 +1,290 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from "next/navigation";
 import { initializeCreatorProfile } from '../services/api';
 
-interface User {
-  fullName?: string;
+export interface User {
+  _id: string;
   email: string;
+  fullName: string;
   avatar?: string;
+  role: string;
 }
 
-interface AuthContextType {
-  isAuthenticated: boolean;
+export interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<{ success: boolean }>;
+  token: string | null;
+  isAuthenticated: boolean;
+  loading: boolean;
+  error: string | null;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
-  getCreatorProfileUrl: () => string;
+  signup: (userData: {
+    email: string;
+    password: string;
+    fullName: string;
+    role?: string;
+  }) => Promise<void>;
+  refreshUserData: () => Promise<void>;
+  checkUserRole: () => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  // Create a ref to track if initialization has already happened
-  const hasInitialized = useRef(false);
+
+  // Check for existing token on load
+  useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    if (storedToken) {
+      setToken(storedToken);
+      fetchUserData(storedToken);
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  // Fetch user data with token
+  const fetchUserData = async (authToken: string) => {
+    try {
+      setLoading(true);
+      const response = await fetch('http://localhost:5001/api/users/profile', {
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to authenticate');
+      }
+
+      // Check if the response is empty
+      const text = await response.text();
+      if (!text) {
+        throw new Error('Server returned an empty response');
+      }
+
+      const userData = JSON.parse(text);
+      setUser(userData);
+      
+      // Set user role - ensure it's either creator or brand
+      if (userData.role === 'creator') {
+        localStorage.setItem('userRole', 'creator');
+        if (userData.username) {
+          localStorage.setItem('username', userData.username);
+        }
+      } else {
+        // For any other role or if role is not specified, set as brand
+        localStorage.setItem('userRole', 'brand');
+        localStorage.setItem('is_brand', 'true');
+        localStorage.setItem('account_type', 'brand');
+      }
+      
+      setError(null);
+    } catch (err) {
+      console.error('Authentication error:', err);
+      setError('Authentication failed');
+      localStorage.removeItem('token');
+      setToken(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const login = async (email: string, password: string) => {
     try {
-      // Call your actual login API
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/users/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
+      setLoading(true);
+      setError(null);
       
-      const data = await response.json();
+      // Use the API service instead of direct fetch
+      const { login } = await import('@/services/api');
+      const data = await login(email, password);
       
-      if (data.token) {
-        // Store token and user data in localStorage
-        localStorage.setItem('token', data.token);
-        
-        // Ensure we have user data to store
-        if (data.user) {
-          localStorage.setItem('user', JSON.stringify(data.user));
-          setUser(data.user);
-        } else {
-          // If the API doesn't return user data, create a basic user object
-          const basicUser = {
-            email,
-            name: email.split('@')[0],
-          };
-          localStorage.setItem('user', JSON.stringify(basicUser));
-          setUser(basicUser);
-        }
-        
-        setIsAuthenticated(true);
-        
-        // Set creator or brand status if applicable
-        if (data.user?.role === 'creator') {
-          localStorage.setItem('userRole', 'creator');
-        } else if (data.user?.role === 'brand') {
-          localStorage.setItem('userRole', 'brand');
-        }
-        
-        return { success: true };
+      // If we got here, login was successful
+      setToken(data.token);
+      setUser(data.user);
+      
+      localStorage.setItem('token', data.token);
+    } catch (err: any) {
+      console.error('Login error:', err);
+      // Set a user-friendly error message
+      if (err.message && err.message.includes('Failed to fetch') || 
+          err.code === 'ERR_NETWORK' || 
+          err.code === 'ERR_CONNECTION_REFUSED') {
+        setError('Cannot connect to server. Please make sure the backend server is running.');
       } else {
-        throw new Error(data.message || 'Login failed');
+        setError(err.message || 'Login failed');
       }
-    } catch (error) {
-      console.error('Login error:', error);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signup = async (userData: { email: string; password: string; fullName: string; role?: string }) => {
+    try {
+      setLoading(true);
+      setError(null);
       
-      // In development, simulate successful login for testing
-      if (process.env.NODE_ENV === 'development') {
-        const mockUser = {
-          email,
-          name: email.split('@')[0],
-          role: email.includes('creator') ? 'creator' : 'user',
-        };
-        
-        localStorage.setItem('token', 'mock_token_' + Date.now());
-        localStorage.setItem('user', JSON.stringify(mockUser));
-        
-        setUser(mockUser);
-        setIsAuthenticated(true);
-        
-        return { success: true };
+      // Use the API service instead of direct fetch
+      const { register } = await import('@/services/api');
+      const data = await register(userData);
+      
+      // If we got here, signup was successful
+      setToken(data.token);
+      setUser(data.user);
+      
+      localStorage.setItem('token', data.token);
+      
+      // Set user role based on registration data
+      const role = userData.role || 'brand'; // Default to brand if no role specified
+      localStorage.setItem('userRole', role);
+      
+      // Set additional information based on role
+      if (role === 'creator') {
+        // Creator-specific settings
+        console.log('Setting up creator account');
+      } else {
+        // Brand-specific settings
+        localStorage.setItem('is_brand', 'true');
+        localStorage.setItem('account_type', 'brand');
+        console.log('Setting up brand account');
       }
-      
-      throw error;
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      // Set a user-friendly error message
+      if (err.message && err.message.includes('Failed to fetch') || 
+          err.code === 'ERR_NETWORK' || 
+          err.code === 'ERR_CONNECTION_REFUSED') {
+        setError('Cannot connect to server. Please make sure the backend server is running.');
+      } else {
+        setError(err.message || 'Registration failed');
+      }
+      throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
   const logout = () => {
-    // Clear all authentication related data
-    if (typeof window !== 'undefined') {
-      // Auth tokens
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      
-      // Creator-specific data
-      localStorage.removeItem('creator_profile_exists');
-      localStorage.removeItem('just_published');
-      localStorage.removeItem('username');
-      localStorage.removeItem('userRole');
-      
-      // Brand-specific data
-      localStorage.removeItem('is_brand');
-      localStorage.removeItem('account_type');
-      localStorage.removeItem('brandName');
-      
-      // Any profile data with creator_ prefix
-      const username = localStorage.getItem('username');
-      if (username) {
-        localStorage.removeItem(`creator_${username}`);
-      }
-      
-      console.log('User logged out, all auth data cleared');
-    }
-    
-    // Update authentication state
-    setIsAuthenticated(false);
+    localStorage.removeItem('token');
+    setToken(null);
     setUser(null);
   };
 
-  useEffect(() => {
-    if (user && typeof window !== 'undefined' && !hasInitialized.current) {
-      const userRole = localStorage.getItem('userRole');
-      const creatorProfileExists = localStorage.getItem('creator_profile_exists');
-      const justPublished = localStorage.getItem('just_published');
+  const refreshUserData = async () => {
+    try {
+      const authToken = localStorage.getItem('token');
+      if (!authToken) {
+        console.log('No token available for refreshing user data');
+        return;
+      }
       
-      // Only initialize if we have a confirmed published profile
-      if (userRole === 'creator' && creatorProfileExists === 'true' && justPublished === 'true') {
-        console.log('Confirmed creator with published profile, initializing');
-        
-        // Set the flag to prevent duplicate initialization
-        hasInitialized.current = true;
-        
-        initializeCreatorProfile()
-          .then(() => console.log('Creator profile initialized'))
-          .catch(err => console.error('Error initializing creator profile:', err));
-      } else if (userRole === 'creator') {
-        console.log('Creator account detected but no published profile yet');
-      }
-    }
-  }, [user]);
-
-  useEffect(() => {
-    let isMounted = true;
-    
-    const checkAuth = () => {
-      if (typeof window !== 'undefined') {
-        const token = localStorage.getItem('token');
-        const userData = localStorage.getItem('user');
-        
-        if (token && isMounted) {
-          setIsAuthenticated(true);
-          
-          if (userData) {
-            try {
-              const parsedUser = JSON.parse(userData);
-              setUser(parsedUser);
-            } catch (e) {
-              console.error('Error parsing user data from localStorage:', e);
-            }
-          }
-        } else if (isMounted) {
-          // No token found, user is not authenticated
-          setIsAuthenticated(false);
-          setUser(null);
+      setLoading(true);
+      const response = await fetch('http://localhost:5001/api/users/profile', {
+        headers: {
+          'Authorization': `Bearer ${authToken}`
         }
-      }
-    };
-    
-    // Check authentication on initial load
-    checkAuth();
-    
-    // Add event listener for page visibility to handle tab switching
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        checkAuth();
-      }
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    // Clean up event listener and set isMounted to false
-    return () => {
-      isMounted = false;
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
+      });
 
-  const getCreatorProfileUrl = () => {
-    if (typeof window !== 'undefined') {
-      const username = localStorage.getItem('username');
-      return username ? `/creator/${username}` : '/creator-dashboard';
+      if (!response.ok) {
+        throw new Error('Failed to refresh user data');
+      }
+
+      const text = await response.text();
+      if (!text) {
+        throw new Error('Server returned an empty response');
+      }
+
+      const userData = JSON.parse(text);
+      console.log('Refreshed user data:', userData);
+      
+      setUser(userData);
+      
+      // Ensure user role is set to either creator or brand
+      if (userData.role === 'creator') {
+        localStorage.setItem('userRole', 'creator');
+        if (userData.username) {
+          localStorage.setItem('username', userData.username);
+        }
+      } else {
+        // Default to brand for any other role
+        localStorage.setItem('userRole', 'brand');
+        localStorage.setItem('is_brand', 'true');
+        localStorage.setItem('account_type', 'brand');
+      }
+      
+      return userData;
+    } catch (err) {
+      console.error('Error refreshing user data:', err);
+      throw err;
+    } finally {
+      setLoading(false);
     }
-    return '/creator-dashboard';
+  };
+
+  const checkUserRole = async (): Promise<string | null> => {
+    try {
+      // Try to get from current user state first
+      if (user && user.role) {
+        console.log('Getting role from current user state:', user.role);
+        return user.role;
+      }
+      
+      // Otherwise refresh from backend
+      const refreshedData = await refreshUserData();
+      if (refreshedData && refreshedData.role) {
+        console.log('Getting role from refreshed user data:', refreshedData.role);
+        return refreshedData.role;
+      }
+      
+      // As a fallback, check localStorage
+      const storedRole = localStorage.getItem('userRole');
+      if (storedRole) {
+        console.log('Getting role from localStorage:', storedRole);
+        return storedRole;
+      }
+      
+      console.log('No role information found');
+      return null;
+    } catch (err) {
+      console.error('Error checking user role:', err);
+      return null;
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, login, logout, getCreatorProfileUrl }}>
+    <AuthContext.Provider value={{
+      user,
+      token,
+      isAuthenticated: !!token,
+      loading,
+      error,
+      login,
+      logout,
+      signup,
+      refreshUserData,
+      checkUserRole
+    }}>
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
+export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
-  
-  // If context is not available, return a default context instead of throwing an error
   if (!context) {
-    console.warn("useAuth was used outside of AuthProvider, returning default context");
-    return {
-      isAuthenticated: false,
-      user: null,
-      login: async () => ({ success: false }),
-      logout: () => {},
-      getCreatorProfileUrl: () => "/creator-dashboard"
-    };
+    throw new Error('useAuth must be used within an AuthProvider');
   }
-  
   return context;
-}
+};

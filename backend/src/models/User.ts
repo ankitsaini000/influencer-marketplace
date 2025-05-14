@@ -2,12 +2,21 @@ import mongoose, { Schema, Document } from 'mongoose';
 import { hash, compare } from 'bcrypt';
 
 export interface IUser extends Document {
+  _id: mongoose.Types.ObjectId;
   email: string;
-  password: string;
+  passwordHash: string;
+  password?: string;
   fullName: string;
   username?: string;
   avatar?: string;
-  role: 'user' | 'creator' | 'admin';
+  role: 'client' | 'creator' | 'admin' | 'brand';
+  isVerified: boolean;
+  verificationToken?: string;
+  resetPasswordToken?: string;
+  resetPasswordExpires?: Date;
+  lastLogin?: Date;
+  isActive: boolean;
+  facebookId?: string;
   createdAt: Date;
   updatedAt: Date;
   isValidPassword(password: string): Promise<boolean>;
@@ -15,81 +24,105 @@ export interface IUser extends Document {
 
 const userSchema = new Schema<IUser>(
   {
-    email: { 
-      type: String, 
+    email: {
+      type: String,
       required: [true, 'Email is required'],
       unique: true,
       lowercase: true,
-      trim: true 
+      trim: true,
     },
-    password: { 
-      type: String, 
-      required: [true, 'Password is required'],
-      minlength: [6, 'Password must be at least 6 characters']
+    passwordHash: {
+      type: String,
+      required: function() {
+        // Only require password if there's no Facebook ID
+        return !this.facebookId;
+      },
     },
-    fullName: { 
-      type: String, 
-      required: [true, 'Full name is required'] 
+    fullName: {
+      type: String,
+      required: [true, 'Full name is required'],
     },
     username: {
       type: String,
       unique: true,
       sparse: true,
       trim: true,
-      match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores']
+      match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores'],
     },
-    avatar: { 
+    avatar: {
       type: String,
-      default: null
+      default: null,
     },
-    role: { 
-      type: String, 
-      enum: {
-        values: ['user', 'creator', 'admin'],
-        message: '{VALUE} is not a valid role'
-      }, 
-      default: 'user' 
+    role: {
+      type: String,
+      enum: ['client', 'creator', 'admin', 'brand'],
+      default: 'client',
+    },
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+    verificationToken: String,
+    resetPasswordToken: String,
+    resetPasswordExpires: Date,
+    lastLogin: Date,
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    facebookId: {
+      type: String,
+      unique: true,
+      sparse: true,
     },
   },
-  { 
-    timestamps: true 
+  {
+    timestamps: true,
   }
 );
 
-// Hash password before saving
-userSchema.pre('save', async function(next) {
-  const user = this;
-  
-  // Only hash the password if it's modified or new
-  if (!user.isModified('password')) return next();
-  
+// Hash password before saving if modified
+userSchema.pre('save', async function (next) {
+  const user = this as IUser;
+
+  if (!user.isModified('passwordHash') || !user.passwordHash) return next();
+
   try {
-    // Generate a salt and hash the password
-    const hashedPassword = await hash(user.password, 10);
-    user.password = hashedPassword;
+    const hashed = await hash(user.passwordHash, 10);
+    user.passwordHash = hashed;
     next();
-  } catch (error: any) {
-    return next(error);
+  } catch (err) {
+    next(err as Error);
   }
 });
 
-// Method to check if password is valid
-userSchema.methods.isValidPassword = async function(password: string): Promise<boolean> {
+// Method to check password
+userSchema.methods.isValidPassword = async function (password: string): Promise<boolean> {
   try {
-    return await compare(password, this.password);
-  } catch (error) {
-    console.error('Password validation error:', error);
+    // If user has no password (Facebook auth only), return false
+    if (!this.passwordHash) return false;
+    return await compare(password, this.passwordHash);
+  } catch (err) {
+    console.error('Password validation failed:', err);
     return false;
   }
 };
 
-// Don't send the password back when converting to JSON
+// Remove sensitive fields from JSON response
 userSchema.set('toJSON', {
-  transform: function(doc, ret) {
-    delete ret.password;
+  transform: function (doc, ret) {
+    delete ret.passwordHash;
     return ret;
-  }
+  },
 });
 
+// Add this after your schema definition but before creating the model
+// This adds a virtual password field that sets the passwordHash
+userSchema.virtual('password')
+  .set(function(password: string) {
+    this.passwordHash = password;
+    // The pre-save hook will hash this before saving
+  });
+
 const User = mongoose.model<IUser>('User', userSchema);
-export default User; 
+export default User;

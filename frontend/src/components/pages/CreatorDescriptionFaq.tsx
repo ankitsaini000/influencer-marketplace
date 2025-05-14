@@ -81,6 +81,9 @@ export const CreatorDescriptionFaq = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    console.log('=== Starting Description & FAQ Form Submission ===');
+    console.log('Form data:', formData);
+    
     if (!formData.brief || !formData.detailed) {
       setError("Both brief and detailed descriptions are required");
       toast.error("Please provide both brief and detailed descriptions");
@@ -103,12 +106,14 @@ export const CreatorDescriptionFaq = () => {
     setError(null);
     
     try {
+      console.log('Updating local storage and store...');
+      
       // Import the creator profile store
       const { useCreatorProfileStore } = await import('../../store/creatorProfileStore');
       const store = useCreatorProfileStore.getState();
       
       // Update the store first
-      store.updateCurrentProfile('description', {
+      store.updateCurrentProfile('descriptionFaq', {
         brief: formData.brief,
         detailed: formData.detailed,
         faq: formData.faq
@@ -125,14 +130,123 @@ export const CreatorDescriptionFaq = () => {
         localStorage.setItem('userData', JSON.stringify(userData));
       }
       
-      toast.success('Description and FAQ saved successfully!');
-      router.push("/creator-setup/social-media");
+      console.log('Local storage updated successfully');
+
+      // Try saving to MongoDB
+      try {
+        // Get the auth token from localStorage
+        const token = localStorage.getItem('token');
+        if (!token) {
+          console.log('No authentication token found - will navigate without server save');
+          toast.error('Authentication token not found. Data saved locally only.');
+          setTimeout(() => {
+            router.push("/creator-setup/social-media");
+          }, 1500);
+          return;
+        }
+        
+        console.log('Preparing to send data to MongoDB...');
+        
+        // Save to MongoDB - Make API call
+        // Try multiple endpoints if the primary one fails
+        let response;
+        let lastError;
+
+        // Try port 5001 first
+        try {
+          console.log('Trying primary endpoint (port 5001)...');
+          response = await fetch('http://localhost:5001/api/creators/description', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(formData)
+          });
+        } catch (err) {
+          console.error('Primary endpoint failed:', err);
+          lastError = err;
+        }
+
+        // If port 5001 fails, try port 5000
+        if (!response || !response.ok) {
+          console.log('Trying fallback endpoint (port 5000)...');
+          try {
+            response = await fetch('http://localhost:5000/api/creators/description', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify(formData)
+            });
+          } catch (err) {
+            console.error('Fallback endpoint failed:', err);
+            lastError = err;
+          }
+        }
+
+        // No working endpoints
+        if (!response || !response.ok) {
+          console.error('All API endpoints failed');
+          if (response && response.status === 500) {
+            throw new Error('The server encountered an internal error. Your data has been saved locally and will be synchronized later.');
+          } else if (response) {
+            if (response.status === 403) {
+              throw new Error('You do not have permission to perform this action. Please ensure you are logged in as a creator.');
+            }
+            if (response.status === 401) {
+              throw new Error('Your session has expired. Please log in again.');
+            }
+            // Save to JSON only if response exists
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `Failed to save description data. Status: ${response.status}`);
+          } else if (lastError) {
+            throw new Error('Could not connect to the server. Your data has been saved locally and will be synchronized later.');
+          } else {
+            throw new Error('Unknown error occurred. Your data has been saved locally.');
+          }
+        }
+        
+        console.log('API Response status:', response.status);
+        
+        const result = await response.json();
+        console.log('MongoDB Save Result:', result);
+        
+        // Display a clear success message
+        toast.success('Description and FAQ saved to MongoDB successfully!');
+        console.log('Success message displayed to user');
+      } catch (apiError: any) {
+        console.error('API error:', apiError);
+        // Show error toast but continue with navigation
+        toast.error(apiError.message || 'Server error, but your data is saved locally');
+        
+        // If it's an authentication error, redirect to login
+        if (apiError.message && (apiError.message.includes('session has expired') || apiError.message.includes('not found'))) {
+          console.log('Authentication error detected, redirecting to login...');
+          setTimeout(() => {
+            router.push('/login');
+          }, 2000);
+          return;
+        }
+      }
+      
+      // Add a visible confirmation and navigate
+      console.log('Preparing to navigate to next page...');
+      setTimeout(() => {
+        router.push("/creator-setup/social-media");
+      }, 1500);
+      
+      console.log('=== Description & FAQ Form Submission Completed Successfully ===');
     } catch (err: any) {
-      console.error("Error saving description information:", err);
+      console.error("Error in form submission:", err);
       const errorMessage = err.message || "An error occurred while saving your data";
       
       toast.error(errorMessage);
       setError(errorMessage);
+      setIsSubmitting(false);
+      
+      console.log('=== Description & FAQ Form Submission Failed ===');
     } finally {
       setIsSubmitting(false);
     }

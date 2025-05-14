@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { toast } from 'react-hot-toast';
 
+// Import from services
+import { publishProfile } from '../services/api';
+
 export interface CreatorProfile {
   id: string;
   userId: string;
@@ -10,11 +13,17 @@ export interface CreatorProfile {
     username: string;
     bio: string;
     profileImage: string;
-    location: string;
-    languages: any[];
+    location: {
+      city: string;
+      state: string;
+      country: string;
+      address?: string;
+      postalCode?: string;
+    };
+    languages: string[];
     skills: string[];
   },
-  basicInfo: {
+  professionalInfo: {
     title: string;
     category: string;
     subcategory: string;
@@ -52,22 +61,12 @@ export interface CreatorProfile {
     };
     customOffers: boolean;
   };
-  description: {
+  descriptionFaq: {
     brief: string;
     detailed: string;
     faq: Array<{ question: string; answer: string }>;
   };
-  requirements: {
-    briefInstructions: string;
-    questions: Array<{ question: string; required: boolean }>;
-    additionalInfo: string;
-  };
-  gallery: {
-    images: string[];
-    videos: string[];
-    portfolioLinks: Array<{ title: string; url: string }>;
-  };
-  socialInfo: {
+  socialMedia: {
     website: string;
     instagram: string;
     twitter: string;
@@ -75,17 +74,22 @@ export interface CreatorProfile {
     linkedin: string;
     youtube: string;
     other: Array<{ platform: string; url: string }>;
-    followersCount: any;
+    followersCount: Record<string, number>;
   };
+  gallery: {
+    images: string[];
+    videos: string[];
+  };
+  portfolio: Array<{ title: string; url: string; description?: string }>;
   status: 'draft' | 'published' | 'suspended';
   completionStatus: {
-    basicInfo: boolean;
-    pricing: boolean;
-    description: boolean;
-    requirements: boolean;
-    gallery: boolean;
-    socialInfo: boolean;
     personalInfo: boolean;
+    professionalInfo: boolean;
+    descriptionFaq: boolean;
+    socialMedia: boolean;
+    pricing: boolean;
+    gallery: boolean;
+    portfolio: boolean;
   };
   createdAt: number;
   updatedAt: number;
@@ -98,11 +102,15 @@ const getDefaultProfile = (): Partial<CreatorProfile> => ({
     username: '',
     bio: '',
     profileImage: '',
-    location: '',
+    location: {
+      city: '',
+      state: '',
+      country: '',
+    },
     languages: [],
     skills: []
   },
-  basicInfo: {
+  professionalInfo: {
     title: '',
     category: '',
     subcategory: '',
@@ -140,22 +148,17 @@ const getDefaultProfile = (): Partial<CreatorProfile> => ({
     },
     customOffers: false
   },
-  description: {
+  descriptionFaq: {
     brief: '',
     detailed: '',
     faq: []
   },
-  requirements: {
-    briefInstructions: '',
-    questions: [],
-    additionalInfo: ''
-  },
   gallery: {
     images: [],
-    videos: [],
-    portfolioLinks: []
+    videos: []
   },
-  socialInfo: {
+  portfolio: [],
+  socialMedia: {
     website: '',
     instagram: '',
     twitter: '',
@@ -167,83 +170,104 @@ const getDefaultProfile = (): Partial<CreatorProfile> => ({
   },
   status: 'draft',
   completionStatus: {
-    basicInfo: false,
+    personalInfo: false,
+    professionalInfo: false,
+    descriptionFaq: false,
+    socialMedia: false,
     pricing: false,
-    description: false,
-    requirements: false,
     gallery: false,
-    socialInfo: false,
-    personalInfo: false
+    portfolio: false
   }
 });
 
 interface CreatorProfileStore {
   currentProfile: Partial<CreatorProfile>;
-  profiles: CreatorProfile[];
   updateCurrentProfile: (section: keyof CreatorProfile, data: Partial<any>) => void;
   resetCurrentProfile: () => void;
   getCompletedSections: () => string[];
   getProfileCompletionPercentage: () => number;
-  saveToLocalStorage: () => void;
+  saveToLocalStorage: () => boolean;
   loadFromLocalStorage: () => boolean;
   isProfileComplete: () => boolean;
-  addProfile: (profile: Omit<CreatorProfile, "id" | "createdAt" | "updatedAt">) => string;
-  getProfileById: (id: string) => CreatorProfile | undefined;
-  getProfilesByUserId: (userId: string) => CreatorProfile[];
-  getAllLocalStorageData: () => any;
+  checkProfileCompleteness: (status: any) => boolean;
+  getProfileCompletenessChecks: () => Record<string, boolean>;
 }
 
-interface UpdatePayload {
-  section: keyof CreatorProfile;
-  data: Partial<any>;
-}
-
-// Helper function to compress images
-const compressImage = (dataUrl: string, maxWidth = 800, quality = 0.7): Promise<string> => {
+// Helper to compress images
+const compressImage = async (base64Image: string, maxWidth = 800, quality = 0.7): Promise<string> => {
   return new Promise((resolve, reject) => {
     try {
       const img = new Image();
       img.onload = () => {
-        const canvas = document.createElement('canvas');
+        // Calculate new dimensions
         let width = img.width;
         let height = img.height;
         
-        // Calculate new dimensions if needed
         if (width > maxWidth) {
-          height = Math.round(height * maxWidth / width);
+          height = (height * maxWidth) / width;
           width = maxWidth;
         }
         
+        // Create canvas and draw resized image
+        const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(dataUrl); // Fallback to original if canvas context fails
+          reject(new Error('Could not get canvas context'));
           return;
         }
         
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        
+        // Convert to base64 with reduced quality
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedBase64);
       };
       
       img.onerror = () => {
-        resolve(dataUrl); // Fallback to original if loading fails
+        reject(new Error('Failed to load image for compression'));
       };
       
-      img.src = dataUrl;
-    } catch (e) {
-      resolve(dataUrl); // Fallback to original on any error
+      img.src = base64Image;
+    } catch (error) {
+      reject(error);
     }
   });
 };
 
-// Helper to clear all unused gallery images
+// Check if localStorage is approaching quota
+const checkStorageQuota = (): { percentUsed: number, available: boolean } => {
+  try {
+    let totalSize = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) {
+        const value = localStorage.getItem(key) || '';
+        totalSize += key.length + value.length;
+      }
+    }
+    
+    // Estimate total available (typical browsers offer 5-10MB)
+    const estimatedLimit = 5 * 1024 * 1024; // 5MB to be safe
+    const percentUsed = (totalSize / estimatedLimit) * 100;
+    
+    return {
+      percentUsed,
+      available: percentUsed < 90 // Consider it unavailable if above 90%
+    };
+  } catch (e) {
+    console.error('Error checking storage quota:', e);
+    return { percentUsed: 100, available: false }; 
+  }
+};
+
+// Helper to clear unused gallery images
 const clearUnusedGalleryImages = () => {
   if (typeof window === 'undefined') return;
   
   try {
-    // Find all keys that start with creator_gallery_image_
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith('creator_gallery_image_')) {
@@ -255,70 +279,17 @@ const clearUnusedGalleryImages = () => {
   }
 };
 
-// Helper to chunk large string data
-const saveChunkedData = (key: string, data: string, chunkSize = 512 * 1024) => {
-  try {
-    // Remove any existing chunks for this key
-    for (let i = 0; i < localStorage.length; i++) {
-      const existingKey = localStorage.key(i);
-      if (existingKey && existingKey.startsWith(`${key}_chunk_`)) {
-        localStorage.removeItem(existingKey);
-      }
-    }
-    
-    // Store the original data length
-    localStorage.setItem(`${key}_length`, data.length.toString());
-    
-    // Split data into chunks and store them
-    const chunks = Math.ceil(data.length / chunkSize);
-    for (let i = 0; i < chunks; i++) {
-      const chunk = data.substring(i * chunkSize, (i + 1) * chunkSize);
-      localStorage.setItem(`${key}_chunk_${i}`, chunk);
-    }
-    
-    return true;
-  } catch (e) {
-    console.error(`Error saving chunked data for ${key}:`, e);
-    return false;
-  }
-};
-
-// Helper to load chunked data
-const loadChunkedData = (key: string): string | null => {
-  try {
-    const lengthStr = localStorage.getItem(`${key}_length`);
-    if (!lengthStr) return null;
-    
-    const length = parseInt(lengthStr, 10);
-    const chunks = Math.ceil(length / (512 * 1024));
-    let result = '';
-    
-    for (let i = 0; i < chunks; i++) {
-      const chunk = localStorage.getItem(`${key}_chunk_${i}`);
-      if (chunk) {
-        result += chunk;
-      } else {
-        console.warn(`Missing chunk ${i} for ${key}`);
-      }
-    }
-    
-    return result;
-  } catch (e) {
-    console.error(`Error loading chunked data for ${key}:`, e);
-    return null;
-  }
-};
-
 export const useCreatorProfileStore = create<CreatorProfileStore>()(
   persist(
     (set, get) => ({
       currentProfile: getDefaultProfile(),
-      profiles: [],
       
+      // Update a specific section of the profile
       updateCurrentProfile: (section, data) => {
         set(state => {
           const sectionData = state.currentProfile[section] || {};
           
+          // Create a new profile with updated section
           const newProfile = { 
             ...state.currentProfile,
             [section]: {
@@ -328,44 +299,40 @@ export const useCreatorProfileStore = create<CreatorProfileStore>()(
           };
           
           // Update completion status based on required fields
-          let completionStatus = {...state.currentProfile.completionStatus} as CreatorProfile['completionStatus'];
+          let completionStatus = { ...state.currentProfile.completionStatus } as CreatorProfile['completionStatus'];
           
-          // Check specific required fields for each section
+          // Determine if section is complete based on specific requirements
           switch(section) {
             case 'personalInfo':
-              if ((data as any).username && (data as any).fullName) {
-                completionStatus.personalInfo = true;
-              }
+              completionStatus.personalInfo = !!(data as any).username && !!(data as any).fullName;
               break;
-            case 'basicInfo':
-              if ((data as any).title && (data as any).category) {
-                completionStatus.basicInfo = true;
-              }
+            case 'professionalInfo':
+              completionStatus.professionalInfo = !!(data as any).title && !!(data as any).category;
               break;
             case 'pricing':
-              if ((data as any).packages?.basic?.price) {
-                completionStatus.pricing = true;
-              }
+              completionStatus.pricing = !!(data as any).packages?.basic?.price;
               break;
-            case 'description':
-              if ((data as any).detailed) {
-                completionStatus.description = true;
-              }
-              break;
-            case 'requirements':
-              completionStatus.requirements = true;
+            case 'descriptionFaq':
+              completionStatus.descriptionFaq = !!(data as any).detailed || !!(data as any).brief;
               break;
             case 'gallery':
-              if (
-                (data as any).images?.length ||
-                (data as any).videos?.length ||
-                (data as any).portfolioLinks?.length
-              ) {
-                completionStatus.gallery = true;
-              }
+              completionStatus.gallery = !!(
+                (data as any).images?.length || 
+                (data as any).videos?.length
+              );
               break;
-            case 'socialInfo':
-              completionStatus.socialInfo = true;
+            case 'portfolio':
+              completionStatus.portfolio = Array.isArray(data) && data.length > 0;
+              break;
+            case 'socialMedia':
+              completionStatus.socialMedia = !!(
+                (data as any).website || 
+                (data as any).instagram || 
+                (data as any).twitter || 
+                (data as any).facebook || 
+                (data as any).linkedin || 
+                (data as any).youtube
+              );
               break;
           }
           
@@ -376,28 +343,17 @@ export const useCreatorProfileStore = create<CreatorProfileStore>()(
           try {
             // Special handling for gallery images which can be large
             if (section === 'gallery' && data.images && data.images.length > 0) {
-              // First clear any previous gallery images
+              // Clear previous gallery images
               clearUnusedGalleryImages();
               
-              // Store metadata without the actual images
-              const metaData = { ...data, images: data.images.map((_: any, i: number) => `gallery_image_${i}`) };
-              localStorage.setItem(`creator_${section}_meta`, JSON.stringify(metaData));
-              
-              // Process and store each image with compression
+              // Store each image separately with compression
               const processImages = async () => {
-                for (let i = 0; i < Math.min(data.images.length, 5); i++) { // Limit to 5 images
+                for (let i = 0; i < Math.min(data.images.length, 5); i++) {
                   try {
                     // Compress the image before storing
                     const compressedImage = await compressImage(data.images[i], 600, 0.6);
                     if (compressedImage) {
-                      const storageKey = `creator_gallery_image_${i}`;
-                      
-                      // Try to use chunked storage for large images
-                      if (compressedImage.length > 500 * 1024) {
-                        saveChunkedData(storageKey, compressedImage);
-                      } else {
-                        localStorage.setItem(storageKey, compressedImage);
-                      }
+                      localStorage.setItem(`creator_gallery_image_${i}`, compressedImage);
                     }
                   } catch (e) {
                     console.warn(`Could not store gallery image ${i}:`, e);
@@ -407,49 +363,46 @@ export const useCreatorProfileStore = create<CreatorProfileStore>()(
               
               // Execute image processing
               processImages().catch(e => console.error("Image processing failed:", e));
-            } else {
-              // For other data, try chunked storage if large
-              const jsonData = JSON.stringify(data);
-              
-              if (jsonData.length > 500 * 1024) {
-                saveChunkedData(`creator_${section}`, jsonData);
-              } else {
-                localStorage.setItem(`creator_${section}`, jsonData);
-              }
             }
-
-            // Update overall profile completeness
+            
+            // Store section data
+            localStorage.setItem(`creator_${section}`, JSON.stringify(data));
+            
+            // Update overall profile completeness flag
             localStorage.setItem('creator_profile_exists', 'true');
           } catch (error) {
             console.error(`Error saving ${section} to localStorage:`, error);
-            toast.error(`Could not save ${section} data. Try reducing image sizes or removing some items.`, { 
-              duration: 4000
-            });
+            toast.error(`Could not save ${section} data. Try reducing image sizes or removing some items.`);
           }
           
           return { currentProfile: newProfile };
         });
       },
       
+      // Reset the profile to defaults
       resetCurrentProfile: () => {
         set({ currentProfile: getDefaultProfile() });
         
         // Clear all localStorage keys related to creator profile
         if (typeof window !== 'undefined') {
           const sections = [
-            'creator-personal-info', 
-            'creator-basicInfo', 
-            'creator-pricing', 
-            'creator-description', 
-            'creator-requirements', 
-            'creator-gallery', 
-            'creator-socialInfo'
+            'creator_personalInfo', 
+            'creator_professionalInfo', 
+            'creator_pricing', 
+            'creator_descriptionFaq', 
+            'creator_gallery', 
+            'creator_portfolio',
+            'creator_socialMedia'
           ];
           
           sections.forEach(key => localStorage.removeItem(key));
+          
+          // Clear gallery images
+          clearUnusedGalleryImages();
         }
       },
       
+      // Get array of completed section names
       getCompletedSections: () => {
         const { completionStatus } = get().currentProfile;
         if (!completionStatus) return [];
@@ -459,6 +412,7 @@ export const useCreatorProfileStore = create<CreatorProfileStore>()(
           .map(([section]) => section);
       },
       
+      // Calculate profile completion percentage
       getProfileCompletionPercentage: () => {
         const { completionStatus } = get().currentProfile;
         if (!completionStatus) return 0;
@@ -469,194 +423,218 @@ export const useCreatorProfileStore = create<CreatorProfileStore>()(
         return Math.round((completedSections / totalSections) * 100);
       },
       
+      // Save entire profile to localStorage
       saveToLocalStorage: () => {
-        if (typeof window === 'undefined') return;
-        
-        const profile = get().currentProfile;
-        
-        // Save each section separately
-        Object.entries(profile).forEach(([key, value]) => {
-          if (key !== 'id' && key !== 'createdAt' && key !== 'updatedAt') {
-            try {
-              // Special handling for gallery section
-              if (key === 'gallery' && value.images && value.images.length > 0) {
-                // Store metadata separately from images
-                const metaData = { ...value, images: value.images.map((_: any, i: number) => `gallery_image_${i}`) };
-                localStorage.setItem(`creator_${key}_meta`, JSON.stringify(metaData));
-                
-                // Each image is already stored individually in updateCurrentProfile
-              } else {
-                // For other data, use JSON
-                const jsonData = JSON.stringify(value);
-                
-                // Use chunked storage for large data
-                if (jsonData.length > 500 * 1024) {
-                  saveChunkedData(`creator_${key}`, jsonData);
-                } else {
-                  localStorage.setItem(`creator_${key}`, jsonData);
-                }
-              }
-            } catch (e) {
-              console.error(`Error saving ${key} to localStorage:`, e);
-            }
-          }
-        });
-        
-        // Store personal info in the legacy format as well for compatibility
-        if (profile.personalInfo) {
-          try {
-            localStorage.setItem('creatorPersonalInfo', JSON.stringify(profile.personalInfo));
-          } catch (e) {
-            console.error('Error saving creatorPersonalInfo:', e);
-          }
-        }
-        
-        // Also save the username for easier retrieval in multiple formats
-        if (profile.personalInfo?.username) {
-          try {
-            localStorage.setItem('username', profile.personalInfo.username);
-          } catch (e) {
-            console.error('Error saving username:', e);
-          }
-        }
-        
-        return true;
-      },
-      
-      loadFromLocalStorage: () => {
         if (typeof window === 'undefined') return false;
         
-        const newProfile = getDefaultProfile();
-        let dataLoaded = false;
-        
-        // Try to load each section
-        Object.keys(newProfile).forEach(key => {
-          try {
-            // First try regular storage
-            let data = localStorage.getItem(`creator_${key}`);
-            
-            // If not found, try chunked storage
-            if (!data) {
-              data = loadChunkedData(`creator_${key}`);
-            }
-            
-            if (data) {
-              (newProfile as Record<string, any>)[key] = JSON.parse(data);
-              dataLoaded = true;
-            }
-            
-            // Special handling for gallery
-            if (key === 'gallery') {
-              // Check for gallery metadata
-              const metaData = localStorage.getItem(`creator_${key}_meta`);
-              if (metaData) {
-                const parsedMeta = JSON.parse(metaData);
-                
-                // Restore real images from individual storage
-                if (parsedMeta.images && Array.isArray(parsedMeta.images)) {
-                  const images: string[] = [];
-                  
-                  // Try to load each image
-                  for (let i = 0; i < 10; i++) { // Check up to 10 images
-                    try {
-                      // First try regular storage
-                      let imageData = localStorage.getItem(`creator_gallery_image_${i}`);
-                      
-                      // If not found, try chunked storage
-                      if (!imageData) {
-                        imageData = loadChunkedData(`creator_gallery_image_${i}`);
-                      }
-                      
-                      if (imageData) {
-                        images.push(imageData);
-                      }
-                    } catch (e) {
-                      console.warn(`Could not load gallery image ${i}:`, e);
-                    }
-                  }
-                  
-                  // Update the gallery with the actual images
-                  if (images.length > 0) {
-                    (newProfile as any).gallery.images = images;
-                    dataLoaded = true;
-                  }
-                }
+        try {
+          // Check if we have enough storage space
+          const { available } = checkStorageQuota();
+          if (!available) {
+            toast.error('Browser storage is full. Please clear some data or use fewer images.');
+            return false;
+          }
+          
+          const profile = get().currentProfile;
+          
+          // Save each section separately
+          Object.entries(profile).forEach(([key, value]) => {
+            if (key !== 'id' && key !== 'createdAt' && key !== 'updatedAt' && key !== 'completionStatus') {
+              try {
+                localStorage.setItem(`creator_${key}`, JSON.stringify(value));
+              } catch (e) {
+                console.error(`Error saving ${key} to localStorage:`, e);
               }
             }
-          } catch (e) {
-            console.error(`Error loading ${key} from localStorage:`, e);
+          });
+          
+          // Store the username for easier retrieval
+          if (profile.personalInfo?.username) {
+            localStorage.setItem('username', profile.personalInfo.username);
           }
-        });
-        
-        if (dataLoaded) {
-          set({ currentProfile: newProfile });
+          
           return true;
+        } catch (error) {
+          console.error('Error saving to localStorage:', error);
+          toast.error('Failed to save profile data. Storage may be full.');
+          return false;
         }
-        
-        return false;
       },
       
-      isProfileComplete: () => {
-        // Always return true to bypass the completion check
-        return true;
-        
-        // Original implementation (commented out)
-        // const { completionStatus } = get().currentProfile;
-        // if (!completionStatus) return false;
-        
-        // // Check if all required sections are complete
-        // return completionStatus.personalInfo && 
-        //        completionStatus.basicInfo && 
-        //        completionStatus.pricing;
-      },
-      
-      getAllLocalStorageData: () => {
-        if (typeof window === 'undefined') return null;
-        
-        // Get all creator-related data from localStorage
-        const data: Record<string, any> = {};
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && (key.startsWith('creator_') || key.startsWith('creator-'))) {
+      // Load profile from localStorage
+      loadFromLocalStorage: () => {
+        try {
+          console.log('Loading profile data from localStorage...');
+          
+          // Load all sections from localStorage
+          const personalInfo = localStorage.getItem('creator_personalInfo');
+          const professionalInfo = localStorage.getItem('creator_professionalInfo');
+          const pricing = localStorage.getItem('creator_pricing');
+          const descriptionFaq = localStorage.getItem('creator_descriptionFaq');
+          const socialMedia = localStorage.getItem('creator_socialMedia');
+          const gallery = localStorage.getItem('creator_gallery');
+          const portfolio = localStorage.getItem('creator_portfolio');
+          
+          // Create a new profile object with the default values
+          const newProfile = getDefaultProfile();
+          let isDataLoaded = false;
+          
+          // Parse and set each section
+          if (personalInfo) {
             try {
-              const value = localStorage.getItem(key);
-              if (value) data[key] = JSON.parse(value);
+              newProfile.personalInfo = JSON.parse(personalInfo);
+              isDataLoaded = true;
             } catch (e) {
-              const value = localStorage.getItem(key);
-              if (value) data[key] = value;
+              console.error('Error parsing personal info:', e);
             }
           }
+          
+          if (professionalInfo) {
+            try {
+              newProfile.professionalInfo = JSON.parse(professionalInfo);
+              isDataLoaded = true;
+            } catch (e) {
+              console.error('Error parsing professional info:', e);
+            }
+          }
+          
+          if (pricing) {
+            try {
+              newProfile.pricing = JSON.parse(pricing);
+              isDataLoaded = true;
+            } catch (e) {
+              console.error('Error parsing pricing data:', e);
+            }
+          }
+          
+          if (descriptionFaq) {
+            try {
+              newProfile.descriptionFaq = JSON.parse(descriptionFaq);
+              isDataLoaded = true;
+            } catch (e) {
+              console.error('Error parsing description & FAQ:', e);
+            }
+          }
+          
+          if (socialMedia) {
+            try {
+              newProfile.socialMedia = JSON.parse(socialMedia);
+              isDataLoaded = true;
+            } catch (e) {
+              console.error('Error parsing social media:', e);
+            }
+          }
+          
+          if (gallery) {
+            try {
+              newProfile.gallery = JSON.parse(gallery);
+              isDataLoaded = true;
+            } catch (e) {
+              console.error('Error parsing gallery:', e);
+            }
+          }
+          
+          if (portfolio) {
+            try {
+              newProfile.portfolio = JSON.parse(portfolio);
+              isDataLoaded = true;
+            } catch (e) {
+              console.error('Error parsing portfolio:', e);
+            }
+          }
+          
+          // Load gallery images
+          if (newProfile.gallery && Array.isArray(newProfile.gallery.images)) {
+            const galleryImages = [];
+            for (let i = 0; i < 5; i++) {
+              const imageKey = `creator_gallery_image_${i}`;
+              const imageData = localStorage.getItem(imageKey);
+              if (imageData) {
+                galleryImages.push(imageData);
+              }
+            }
+            
+            if (galleryImages.length > 0) {
+              newProfile.gallery.images = galleryImages;
+            }
+          }
+          
+          // Update completion status
+          newProfile.completionStatus = {
+            personalInfo: !!(newProfile.personalInfo?.fullName && newProfile.personalInfo?.username),
+            professionalInfo: !!(newProfile.professionalInfo?.title && newProfile.professionalInfo?.category),
+            descriptionFaq: !!(newProfile.descriptionFaq?.detailed || newProfile.descriptionFaq?.brief),
+            socialMedia: !!(
+              newProfile.socialMedia?.website || 
+              newProfile.socialMedia?.instagram || 
+              newProfile.socialMedia?.twitter || 
+              newProfile.socialMedia?.facebook ||
+              newProfile.socialMedia?.linkedin ||
+              newProfile.socialMedia?.youtube
+            ),
+            pricing: !!(newProfile.pricing?.packages?.basic?.price),
+            gallery: !!(newProfile.gallery?.images && newProfile.gallery.images.length > 0),
+            portfolio: !!(newProfile.portfolio && newProfile.portfolio.length > 0)
+          };
+          
+          // If we loaded at least some data, update the current profile
+          if (isDataLoaded) {
+            console.log('Successfully loaded profile data from localStorage');
+            set({ currentProfile: newProfile });
+            return true;
+          } else {
+            console.warn('No profile data found in localStorage');
+            return false;
+          }
+        } catch (error) {
+          console.error('Error loading profile from localStorage:', error);
+          return false;
         }
+      },
+      
+      // Check if profile is complete with required sections
+      isProfileComplete: () => {
+        // In development mode, always return true to bypass completion checks
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Development mode: bypassing profile completion check');
+          return true;
+        }
+
+        const requiredSections = ['personalInfo', 'professionalInfo', 'descriptionFaq', 'socialMedia'];
+        const completionStatus = get().currentProfile.completionStatus;
         
-        return data;
+        if (!completionStatus) return false;
+        
+        const isComplete = requiredSections.every(section => 
+          completionStatus[section as keyof typeof completionStatus] === true
+        );
+        
+        return isComplete;
       },
       
-      // Original methods preserved
-      addProfile: (profile) => {
-        const id = crypto.randomUUID().split("-")[0];
-        const now = Date.now();
-        const newProfile = {
-          ...profile,
-          id,
-          createdAt: now,
-          updatedAt: now
+      // Check profile completeness status
+      checkProfileCompleteness: (status: any) => {
+        if (!status) return false;
+        
+        const requiredSections = ['personalInfo', 'professionalInfo', 'descriptionFaq', 'socialMedia'];
+        return requiredSections.every(section => status[section] === true);
+      },
+      
+      // Get profile completeness checks for each section
+      getProfileCompletenessChecks: () => {
+        const { completionStatus } = get().currentProfile;
+        if (!completionStatus) return {};
+        
+        return {
+          ...completionStatus,
+          isComplete: get().isProfileComplete()
         };
-        set((state) => ({
-          profiles: [newProfile, ...state.profiles],
-        }));
-        return id;
-      },
-      
-      getProfileById: (id) => {
-        return get().profiles.find((profile) => profile.id === id);
-      },
-      
-      getProfilesByUserId: (userId) => {
-        return get().profiles.filter((profile) => profile.userId === userId);
-      },
+      }
     }),
     {
-      name: "creator-profiles",
+      name: "creator-profile-storage",
+      // Only store the currentProfile state in localStorage
+      partialize: (state) => ({ currentProfile: state.currentProfile }),
     }
   )
 );

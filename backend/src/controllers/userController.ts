@@ -8,7 +8,7 @@ import { generateToken } from '../utils/tokenUtils';
 // @access  Public
 export const registerUser = asyncHandler(async (req: Request, res: Response) => {
   console.log('Register request received with body:', req.body);
-  const { email, password, fullName, username } = req.body;
+  const { email, password, fullName, username, role } = req.body;
 
   if (!email || !password || !fullName) {
     console.log('Missing required fields:', { email: !!email, password: !!password, fullName: !!fullName });
@@ -37,17 +37,19 @@ export const registerUser = asyncHandler(async (req: Request, res: Response) => 
 
   try {
     // Create new user
-    console.log('Creating new user with data:', { email, fullName, username });
+    console.log('Creating new user with data:', { email, fullName, username, role });
     const user = await User.create({
       email,
       password,
       fullName,
       username,
+      // Ensure role is properly set according to what was provided
+      role: ['creator', 'client', 'brand'].includes(role) ? role : 'client',
     });
 
     if (user) {
       const token = generateToken(user._id);
-      console.log('User created successfully:', { userId: user._id, email: user.email });
+      console.log('User created successfully:', { userId: user._id, email: user.email, role: user.role });
       res.status(201).json({
         _id: user._id,
         email: user.email,

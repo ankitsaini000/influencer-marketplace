@@ -1,38 +1,55 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IMessage extends Document {
-  senderId: mongoose.Types.ObjectId;
-  receiverId: mongoose.Types.ObjectId;
-  content: string;
-  isRead: boolean;
+  _id: mongoose.Types.ObjectId;
+  conversation: mongoose.Types.ObjectId;
+  sender: mongoose.Types.ObjectId;
+  receiver: mongoose.Types.ObjectId;
+  content?: string;
   attachments?: string[];
+  type: 'text' | 'image' | 'file' | 'system';
+  isRead: boolean;
+  sentAt: Date;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const messageSchema = new Schema<IMessage>(
   {
-    senderId: {
+    conversation: {
+      type: Schema.Types.ObjectId,
+      required: true,
+      ref: 'Conversation'
+    },
+    sender: {
       type: Schema.Types.ObjectId,
       required: true,
       ref: 'User'
     },
-    receiverId: {
+    receiver: {
       type: Schema.Types.ObjectId,
       required: true,
       ref: 'User'
     },
     content: {
+      type: String
+    },
+    attachments: [{
+      type: String
+    }],
+    type: {
       type: String,
-      required: true
+      enum: ['text', 'image', 'file', 'system'],
+      default: 'text'
     },
     isRead: {
       type: Boolean,
       default: false
     },
-    attachments: [{
-      type: String
-    }]
+    sentAt: {
+      type: Date,
+      default: Date.now
+    }
   },
   {
     timestamps: true
@@ -40,8 +57,9 @@ const messageSchema = new Schema<IMessage>(
 );
 
 // Create indexes for better query performance
-messageSchema.index({ senderId: 1, receiverId: 1 });
-messageSchema.index({ createdAt: -1 });
+messageSchema.index({ conversation: 1 });
+messageSchema.index({ sender: 1, receiver: 1 });
+messageSchema.index({ sentAt: -1 });
 
 const Message = mongoose.model<IMessage>('Message', messageSchema);
 export default Message; 

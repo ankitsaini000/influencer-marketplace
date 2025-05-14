@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { DashboardLayout } from '../../components/layout/DashboardLayout';
 import { 
   Search, Filter, Star, Users, MapPin, Sparkles, 
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { getFilteredCreators } from '@/services/api';
 
 // Creator interface to define the expected shape of creator data
 interface Creator {
@@ -18,7 +19,13 @@ interface Creator {
   avatar: string;
   category: string;
   subCategory?: string;
-  location: string;
+  location: string | {
+    city?: string;
+    state?: string;
+    country?: string;
+    address?: string;
+    postalCode?: string;
+  };
   bio: string;
   pricing: {
     basic: number;
@@ -215,8 +222,7 @@ const TikTokIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
 );
 
 export default function FindCreatorsPage() {
-  const [creators, setCreators] = useState<Creator[]>(mockCreators);
-  const [filteredCreators, setFilteredCreators] = useState<Creator[]>(mockCreators);
+  const [creators, setCreators] = useState<Creator[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All Categories");
   const [selectedPlatform, setSelectedPlatform] = useState("All Platforms");
@@ -224,83 +230,94 @@ export default function FindCreatorsPage() {
   const [followerRange, setFollowerRange] = useState<[number, number]>([0, 1000000]);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [sortOption, setSortOption] = useState("relevance");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [likedCreators, setLikedCreators] = useState<number[]>([]);
+  
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCreators, setTotalCreators] = useState(0);
+  
+  // Infinite scroll observer
+  const observer = useRef<IntersectionObserver | null>(null);
+  const lastCreatorElementRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (loading) return;
+      if (observer.current) observer.current.disconnect();
+      
+      observer.current = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting && hasMore) {
+          setPage(prevPage => prevPage + 1);
+        }
+      });
+      
+      if (node) observer.current.observe(node);
+    },
+    [loading, hasMore]
+  );
 
-  // Apply filters when criteria change
+  // Fetch creators when filters or page changes
   useEffect(() => {
-    setLoading(true);
-    
-    // Apply all filters
-    let results = [...creators];
-    
-    // Search query filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      results = results.filter(creator => 
-        creator.name.toLowerCase().includes(query) ||
-        creator.username.toLowerCase().includes(query) ||
-        creator.bio.toLowerCase().includes(query) ||
-        creator.category.toLowerCase().includes(query) ||
-        creator.location.toLowerCase().includes(query) ||
-        creator.tags.some(tag => tag.toLowerCase().includes(query))
-      );
+    fetchCreators();
+  }, [page, sortOption]);
+  
+  // Reset creators and pagination when search or filters change
+  useEffect(() => {
+    if (page === 1) {
+      fetchCreators();
+    } else {
+      // Reset to page 1 when filters change
+      setCreators([]);
+      setPage(1);
     }
-    
-    // Category filter
-    if (selectedCategory !== "All Categories") {
-      results = results.filter(creator => creator.category === selectedCategory);
-    }
-    
-    // Platform filter
-    if (selectedPlatform !== "All Platforms") {
-      results = results.filter(creator => 
-        creator.platforms.includes(selectedPlatform)
-      );
-    }
-    
-    // Price range filter
-    results = results.filter(creator => 
-      creator.pricing.basic >= priceRange[0] && 
-      creator.pricing.premium <= priceRange[1]
-    );
-    
-    // Follower range filter
-    results = results.filter(creator => 
-      creator.followers.total >= followerRange[0] && 
-      creator.followers.total <= followerRange[1]
-    );
-    
-    // Apply sorting
-    if (sortOption === "price-low") {
-      results.sort((a, b) => a.pricing.basic - b.pricing.basic);
-    } else if (sortOption === "price-high") {
-      results.sort((a, b) => b.pricing.basic - a.pricing.basic);
-    } else if (sortOption === "rating") {
-      results.sort((a, b) => b.rating - a.rating);
-    } else if (sortOption === "followers") {
-      results.sort((a, b) => b.followers.total - a.followers.total);
-    } else if (sortOption === "engagement") {
-      results.sort((a, b) => 
-        parseFloat(b.engagement.replace('%', '')) - 
-        parseFloat(a.engagement.replace('%', ''))
-      );
-    }
-    
-    // Simulate network delay
-    setTimeout(() => {
-      setFilteredCreators(results);
+  }, [searchQuery, selectedCategory, selectedPlatform, priceRange, followerRange]);
+
+  const fetchCreators = async () => {
+    try {
+      setLoading(true);
+      
+      // Map sort option to API format
+      const sortByMap: Record<string, string> = {
+        'relevance': 'relevance',
+        'price-low': 'price-low',
+        'price-high': 'price-high',
+        'rating': 'rating',
+        'followers': 'followers',
+        'engagement': 'engagement'
+      };
+      
+      // Prepare filters for API
+      const filters = {
+        search: searchQuery,
+        category: selectedCategory,
+        platform: selectedPlatform,
+        priceMin: priceRange[0],
+        priceMax: priceRange[1],
+        followersMin: followerRange[0],
+        followersMax: followerRange[1],
+        sortBy: sortByMap[sortOption] || 'relevance',
+        page,
+        limit: 9 // Show 9 creators per page (3x3 grid)
+      };
+      
+      const result = await getFilteredCreators(filters);
+      
+      // First page replaces all creators, subsequent pages append
+      if (page === 1) {
+        setCreators(result.creators);
+      } else {
+        setCreators(prev => [...prev, ...result.creators]);
+      }
+      
+      // Update pagination info
+      setTotalCreators(result.pagination.total);
+      setHasMore(result.pagination.hasMore);
+    } catch (error) {
+      console.error('Error fetching creators:', error);
+    } finally {
       setLoading(false);
-    }, 500);
-  }, [
-    creators, 
-    searchQuery, 
-    selectedCategory, 
-    selectedPlatform, 
-    priceRange, 
-    followerRange, 
-    sortOption
-  ]);
+    }
+  };
 
   // Toggle creator like status
   const toggleLike = (creatorId: number) => {
@@ -497,7 +514,7 @@ export default function FindCreatorsPage() {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h2 className="text-2xl font-semibold text-gray-900">
-                {filteredCreators.length} Creators Found
+                {totalCreators} Creators Found
               </h2>
               <p className="text-gray-600">
                 {searchQuery && `Showing results for "${searchQuery}"`}
@@ -505,133 +522,145 @@ export default function FindCreatorsPage() {
             </div>
           </div>
 
-          {/* Loading State */}
-          {loading ? (
+          {/* Initial Loading State */}
+          {loading && creators.length === 0 ? (
             <div className="flex justify-center items-center py-20">
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
             </div>
           ) : (
             <>
               {/* Creators Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredCreators.map((creator) => (
-                  <div
-                    key={creator.id}
-                    className="bg-white rounded-2xl p-6 hover:shadow-lg transition-all border border-gray-100 relative group"
-                  >
-                    {creator.isVerified && (
-                      <div className="absolute top-4 right-4">
-                        <span className="px-3 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-medium flex items-center gap-1">
-                          <CheckCircle size={12} className="text-blue-500" />
-                          Verified
-                        </span>
-                      </div>
-                    )}
+              {creators.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {creators.map((creator, index) => {
+                    // Add ref to the last element for infinite scrolling
+                    const isLastElement = index === creators.length - 1;
+                    
+                    return (
+                      <div
+                        key={creator.id}
+                        ref={isLastElement ? lastCreatorElementRef : null}
+                        className="bg-white rounded-2xl p-6 hover:shadow-lg transition-all border border-gray-100 relative group"
+                      >
+                        {creator.isVerified && (
+                          <div className="absolute top-4 right-4">
+                            <span className="px-3 py-1 bg-blue-100 text-blue-600 rounded-full text-xs font-medium flex items-center gap-1">
+                              <CheckCircle size={12} className="text-blue-500" />
+                              Verified
+                            </span>
+                          </div>
+                        )}
 
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-16 h-16 rounded-xl overflow-hidden relative">
-                        <Image
-                          src={creator.avatar}
-                          alt={creator.name}
-                          fill
-                          className="object-cover"
-                          unoptimized // For mock data only
-                        />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-900">
-                            {creator.name}
-                          </h3>
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="w-16 h-16 rounded-xl overflow-hidden relative">
+                            <Image
+                              src={creator.avatar}
+                              alt={creator.name}
+                              fill
+                              className="object-cover"
+                              unoptimized // For compatibility with external urls
+                            />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-semibold text-gray-900">
+                                {creator.name}
+                              </h3>
+                            </div>
+                            <p className="text-sm text-gray-500">{creator.username}</p>
+                            <p className="text-sm text-gray-500 flex items-center gap-1">
+                              <MapPin size={14} className="text-gray-400" />
+                              {typeof creator.location === 'object' 
+                                ? `${creator.location.city || ''}, ${creator.location.country || 'India'}`
+                                : creator.location || 'India'}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-sm text-gray-500">{creator.username}</p>
-                        <p className="text-sm text-gray-500 flex items-center gap-1">
-                          <MapPin size={14} className="text-gray-400" />
-                          {creator.location}
-                        </p>
-                      </div>
-                    </div>
 
-                    <p className="text-sm text-gray-600 mb-4 line-clamp-2">{creator.bio}</p>
+                        <p className="text-sm text-gray-600 mb-4 line-clamp-2">{creator.bio}</p>
 
-                    <div className="flex items-center gap-4 mb-4 text-sm">
-                      <div className="flex items-center gap-1">
-                        <Star size={16} className="text-yellow-400 fill-yellow-400" />
-                        <span className="font-medium">{creator.rating}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Users size={16} className="text-gray-400" />
-                        <span>{formatFollowers(creator.followers.total)}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <TrendingUp size={16} className="text-green-500" />
-                        <span>{creator.engagement}</span>
-                      </div>
-                    </div>
+                        <div className="flex items-center gap-4 mb-4 text-sm">
+                          <div className="flex items-center gap-1">
+                            <Star size={16} className="text-yellow-400 fill-yellow-400" />
+                            <span className="font-medium">{creator.rating.toFixed(1)}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Users size={16} className="text-gray-400" />
+                            <span>{formatFollowers(creator.followers.total)}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <TrendingUp size={16} className="text-green-500" />
+                            <span>{creator.engagement}</span>
+                          </div>
+                        </div>
 
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {creator.platforms.map((platform) => (
-                        <span
-                          key={platform}
-                          className="px-2 py-1 bg-purple-50 text-purple-600 rounded-full text-xs flex items-center gap-1"
-                        >
-                          {getPlatformIcon(platform)}
-                          {platform}
-                        </span>
-                      ))}
-                    </div>
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {creator.platforms.map((platform) => (
+                            <span
+                              key={platform}
+                              className="px-2 py-1 bg-purple-50 text-purple-600 rounded-full text-xs flex items-center gap-1"
+                            >
+                              {getPlatformIcon(platform)}
+                              {platform}
+                            </span>
+                          ))}
+                        </div>
 
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {creator.tags.slice(0, 3).map((tag) => (
-                        <span
-                          key={tag}
-                          className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {creator.tags.slice(0, 3).map((tag) => (
+                            <span
+                              key={tag}
+                              className="px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
 
-                    <div className="pt-4 border-t border-gray-100">
-                      <div className="flex justify-between items-center mb-4">
-                        <span className="text-sm text-gray-500">Starting from</span>
-                        <span className="font-semibold text-gray-900">₹{creator.pricing.basic.toLocaleString()}</span>
+                        <div className="pt-4 border-t border-gray-100">
+                          <div className="flex justify-between items-center mb-4">
+                            <span className="text-sm text-gray-500">Starting from</span>
+                            <span className="font-semibold text-gray-900">
+                              ₹{creator.pricing.basic.toLocaleString()}
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => toggleLike(creator.id)}
+                              className={`p-2 rounded-lg transition-colors ${
+                                likedCreators.includes(creator.id)
+                                  ? "text-red-500 bg-red-50"
+                                  : "text-gray-400 hover:text-red-500 hover:bg-red-50"
+                              }`}
+                            >
+                              <Heart size={20} className={likedCreators.includes(creator.id) ? "fill-red-500" : ""} />
+                            </button>
+                            <Link
+                              href={`/creator/${creator.username.replace('@', '')}`}
+                              className="flex-1"
+                            >
+                              <button className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
+                                View Profile
+                              </button>
+                            </Link>
+                            <Link
+                              href={`/messages/new?creator=${creator.username.replace('@', '')}`}
+                            >
+                              <button className="p-2 bg-purple-100 text-purple-600 rounded-lg hover:bg-purple-200 transition-colors">
+                                <MessageSquare size={20} />
+                              </button>
+                            </Link>
+                          </div>
+                        </div>
                       </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => toggleLike(creator.id)}
-                          className={`p-2 rounded-lg transition-colors ${
-                            likedCreators.includes(creator.id)
-                              ? "text-red-500 bg-red-50"
-                              : "text-gray-400 hover:text-red-500 hover:bg-red-50"
-                          }`}
-                        >
-                          <Heart size={20} className={likedCreators.includes(creator.id) ? "fill-red-500" : ""} />
-                        </button>
-                        <Link
-                          href={`/creator/${creator.username.replace('@', '')}`}
-                          className="flex-1"
-                        >
-                          <button className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors">
-                            View Profile
-                          </button>
-                        </Link>
-                        <Link
-                          href={`/messages/new?creator=${creator.username.replace('@', '')}`}
-                        >
-                          <button className="p-2 bg-purple-100 text-purple-600 rounded-lg hover:bg-purple-200 transition-colors">
-                            <MessageSquare size={20} />
-                          </button>
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* No Results */}
-              {filteredCreators.length === 0 && (
+              {!loading && creators.length === 0 && (
                 <div className="text-center py-12">
                   <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Search size={32} className="text-purple-600" />
@@ -642,6 +671,21 @@ export default function FindCreatorsPage() {
                   <p className="text-gray-600">
                     Try adjusting your search or filters to find what you're looking for
                   </p>
+                </div>
+              )}
+              
+              {/* Loading More Indicator (for infinite scroll) */}
+              {loading && creators.length > 0 && (
+                <div className="flex justify-center items-center py-6 mt-6">
+                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-purple-500 mr-3"></div>
+                  <span className="text-gray-600">Loading more creators...</span>
+                </div>
+              )}
+              
+              {/* End of Results */}
+              {!loading && !hasMore && creators.length > 0 && (
+                <div className="text-center py-8 mt-6">
+                  <p className="text-gray-500">You've reached the end of the results</p>
                 </div>
               )}
             </>

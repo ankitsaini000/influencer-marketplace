@@ -3,12 +3,47 @@ import { getCreatorByUsername } from '@/services/api';
 import toast from 'react-hot-toast';
 import { Star, Users, Clock, ArrowRight, Check, Share2, Instagram, Facebook, Twitter, Youtube, Linkedin, Heart, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
+import { useLikeStore } from '@/store/likeStore';
+import { useMessageStore } from '@/store/messageStore';
+import { useRouter } from 'next/navigation';
 
 const CreatorProfileContainer = ({ username }: { username: string }) => {
+  const router = useRouter();
   const [creatorData, setCreatorData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('basic');
+  const [isLikeAnimating, setIsLikeAnimating] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [contactMessage, setContactMessage] = useState('');
+
+  // Get like and message store functions
+  const { isLiked, addLike, removeLike } = useLikeStore();
+  const { addMessage } = useMessageStore();
+  
+  // Check if creator is liked - needs a proper useEffect to handle deps
+  // Replace simple variable with state to ensure reactivity
+  const [creatorIsLiked, setCreatorIsLiked] = useState(false);
+
+  // Update liked status whenever creator data changes
+  useEffect(() => {
+    if (creatorData) {
+      const liked = isLiked(username);
+      console.log(`Is creator ${username} liked?`, liked);
+      setCreatorIsLiked(liked);
+    }
+  }, [creatorData, isLiked, username]);
+
+  // Debug and initialize stores in development
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      const likeStorage = localStorage.getItem('liked-creators-storage');
+      const messageStorage = localStorage.getItem('messages-storage');
+      
+      console.log('Likes localStorage data:', likeStorage ? JSON.parse(likeStorage) : 'Not found');
+      console.log('Messages localStorage data:', messageStorage ? JSON.parse(messageStorage) : 'Not found');
+    }
+  }, []);
 
   const loadCreatorProfile = async () => {
     setIsLoading(true);
@@ -150,6 +185,97 @@ const CreatorProfileContainer = ({ username }: { username: string }) => {
     { id: 6, image: '/images/portfolio-6.jpg', alt: 'Social Media Content' }
   ];
 
+  // Handle like/unlike
+  const handleLikeToggle = () => {
+    if (!creatorData) return;
+    
+    setIsLikeAnimating(true);
+    setTimeout(() => setIsLikeAnimating(false), 300);
+    
+    if (creatorIsLiked) {
+      removeLike(username);
+      // Update state immediately for UI feedback
+      setCreatorIsLiked(false);
+      toast.success(
+        <div className="flex flex-col">
+          <span>Removed from your liked creators</span>
+          <button 
+            className="text-xs underline text-left mt-1"
+            onClick={() => router.push('/likes')}
+          >
+            View all liked creators
+          </button>
+        </div>
+      );
+    } else {
+      const creatorToAdd = {
+        creatorId: username,
+        creatorName: creatorData.name || 'Creator Name',
+        creatorAvatar: creatorData.profileImage || 'https://images.unsplash.com/photo-1531891437562-4301cf35b7e4',
+        creatorCategory: creatorData.category || 'Entertainment',
+      };
+      
+      console.log('Adding creator to likes:', creatorToAdd);
+      addLike(creatorToAdd);
+      
+      // Update state immediately for UI feedback
+      setCreatorIsLiked(true);
+      
+      toast.success(
+        <div className="flex flex-col">
+          <span>Added to your liked creators</span>
+          <button 
+            className="text-xs underline text-left mt-1"
+            onClick={() => router.push('/likes')}
+          >
+            View all liked creators
+          </button>
+        </div>
+      );
+    }
+  };
+
+  // Handle contact
+  const handleContactSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!contactMessage.trim()) {
+      toast.error('Please enter a message');
+      return;
+    }
+    
+    // Add message to store
+    const newMessage = {
+      creatorId: username,
+      creatorName: creatorData?.name || 'Creator Name',
+      creatorAvatar: creatorData?.profileImage || 'https://images.unsplash.com/photo-1531891437562-4301cf35b7e4',
+      subject: 'New contact request',
+      content: contactMessage,
+      senderType: 'user' as 'user',
+      source: 'contact' as 'contact',
+    };
+    
+    console.log('Sending new message:', newMessage);
+    addMessage(newMessage);
+    
+    // Close modal and reset
+    setContactMessage('');
+    setShowContactModal(false);
+    
+    // Show success toast with link to messages
+    toast.success(
+      <div className="flex flex-col">
+        <span>Message sent successfully</span>
+        <button 
+          className="text-xs underline text-left mt-1"
+          onClick={() => router.push('/messages')}
+        >
+          View in messages
+        </button>
+      </div>
+    );
+  };
+
   if (isLoading) {
     return <div className="flex items-center justify-center min-h-[60vh]">
       <div className="animate-spin h-12 w-12 border-4 border-purple-600 rounded-full border-t-transparent"></div>
@@ -209,15 +335,27 @@ const CreatorProfileContainer = ({ username }: { username: string }) => {
           
           {/* Action Buttons */}
           <div className="flex mt-4 sm:mt-0 space-x-2">
-            <button className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-full text-sm font-medium flex items-center">
+            <button 
+              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-full text-sm font-medium flex items-center"
+              onClick={() => setShowContactModal(true)}
+            >
               <MessageCircle className="h-4 w-4 mr-1.5" />
               Contact Me
             </button>
             <button className="border border-gray-300 text-gray-700 p-2 rounded-full hover:bg-gray-50">
               <Share2 className="h-4 w-4" />
             </button>
-            <button className="border border-gray-300 text-gray-700 p-2 rounded-full hover:bg-gray-50">
-              <Heart className="h-4 w-4" />
+            <button 
+              className={`border ${creatorIsLiked ? 'border-red-200 bg-red-50 text-red-500' : 'border-gray-300 text-gray-700'} p-2 rounded-full hover:bg-gray-50 relative overflow-hidden`}
+              onClick={handleLikeToggle}
+            >
+              <Heart 
+                className={`h-4 w-4 transform transition-transform ${isLikeAnimating ? 'animate-heartPulse' : 'scale-100'}`} 
+                fill={creatorIsLiked ? 'currentColor' : 'none'} 
+              />
+              {isLikeAnimating && (
+                <span className="absolute inset-0 animate-ping bg-red-400 rounded-full opacity-20"></span>
+              )}
             </button>
           </div>
         </div>
@@ -459,7 +597,13 @@ const CreatorProfileContainer = ({ username }: { username: string }) => {
                   ))}
                 </div>
                 
-                <button className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-full text-sm font-medium flex items-center justify-center">
+                <button 
+                  className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-full text-sm font-medium flex items-center justify-center"
+                  onClick={() => {
+                    console.log(`Continue button clicked for creator: ${username}, package: ${activeTab}`);
+                    window.location.href = `/checkout?creatorId=${username}&packageType=${activeTab}`;
+                  }}
+                >
                   Continue <ArrowRight className="h-4 w-4 ml-1" />
                 </button>
                 
@@ -520,6 +664,58 @@ const CreatorProfileContainer = ({ username }: { username: string }) => {
           </div>
         </div>
       </div>
+      
+      {/* Contact Modal */}
+      {showContactModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 relative animate-fadeIn">
+            <button 
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+              onClick={() => setShowContactModal(false)}
+            >
+              ✕
+            </button>
+            
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-gray-900">Contact {creatorData?.name || 'Creator'}</h2>
+              <p className="text-gray-600 mt-1 text-sm">Send a message to start a conversation</p>
+            </div>
+            
+            <form onSubmit={handleContactSubmit}>
+              <div className="mb-4">
+                <label htmlFor="message" className="block text-sm font-medium text-gray-700 mb-2">
+                  Your Message
+                </label>
+                <textarea
+                  id="message"
+                  rows={5}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 text-gray-700"
+                  placeholder="Write your message here..."
+                  value={contactMessage}
+                  onChange={(e) => setContactMessage(e.target.value)}
+                  required
+                ></textarea>
+              </div>
+              
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="px-4 py-2 text-gray-600 mr-2"
+                  onClick={() => setShowContactModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium"
+                >
+                  Send Message
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

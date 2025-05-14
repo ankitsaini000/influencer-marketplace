@@ -35,32 +35,46 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const messageSchema = new mongoose_1.Schema({
-    senderId: {
+    conversation: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        required: true,
+        ref: 'Conversation'
+    },
+    sender: {
         type: mongoose_1.Schema.Types.ObjectId,
         required: true,
         ref: 'User'
     },
-    receiverId: {
+    receiver: {
         type: mongoose_1.Schema.Types.ObjectId,
         required: true,
         ref: 'User'
     },
     content: {
+        type: String
+    },
+    attachments: [{
+            type: String
+        }],
+    type: {
         type: String,
-        required: true
+        enum: ['text', 'image', 'file', 'system'],
+        default: 'text'
     },
     isRead: {
         type: Boolean,
         default: false
     },
-    attachments: [{
-            type: String
-        }]
+    sentAt: {
+        type: Date,
+        default: Date.now
+    }
 }, {
     timestamps: true
 });
 // Create indexes for better query performance
-messageSchema.index({ senderId: 1, receiverId: 1 });
-messageSchema.index({ createdAt: -1 });
+messageSchema.index({ conversation: 1 });
+messageSchema.index({ sender: 1, receiver: 1 });
+messageSchema.index({ sentAt: -1 });
 const Message = mongoose_1.default.model('Message', messageSchema);
 exports.default = Message;

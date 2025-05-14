@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-// Import the authAPI from services
-import { authAPI, setBrandStatus, setCreatorStatus } from "@/services/api";
+import { useAuth } from "@/context/AuthContext";
+import FacebookLoginButton from "@/components/FacebookLoginButton";
 
 // Define type for user registration data
 interface UserRegistrationData {
@@ -43,11 +43,26 @@ export default function RegisterPage() {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { signup, isAuthenticated } = useAuth();
 
   useEffect(() => {
     const type = searchParams?.get("type") as "creator" | "brand" | null;
     setUserType(type);
   }, [searchParams]);
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      const userRole = localStorage.getItem('userRole');
+      if (userRole === 'creator') {
+        router.push('/creator-onboarding');
+      } else if (userRole === 'brand') {
+        router.push('/brand-dashboard');
+      } else {
+        router.push('/dashboard');
+      }
+    }
+  }, [isAuthenticated, router]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -71,46 +86,41 @@ export default function RegisterPage() {
       return;
     }
     
+    if (!userType) {
+      setError("Please select whether you're joining as an Influencer or a Brand");
+      return;
+    }
+    
     setLoading(true);
     
     try {
       console.log("Submitting registration data:", {
-        ...formData,
-        role: userType === "creator" ? "creator" : "user"
-      });
-      
-      // Use the real register function from authAPI
-      const response = await authAPI.register({
         fullName: formData.fullName,
         email: formData.email,
         password: formData.password,
-        role: userType === "creator" ? "creator" : "user"
+        role: userType
       });
       
-      console.log("Registration successful:", response);
+      // Use the auth context signup function with the correct parameters
+      await signup({
+        fullName: formData.fullName,
+        email: formData.email,
+        password: formData.password,
+        role: userType
+      });
       
-      if (response && response.token) {
-        localStorage.setItem("token", response.token);
-      }
-      
-      // Explicitly set the account type in localStorage based on userType
-      if (userType === "creator") {
-        // Set creator status and store username
-        setCreatorStatus();
-        localStorage.setItem("username", formData.fullName.toLowerCase().replace(/\s+/g, '_'));
-        router.push("/creator-onboarding");
-      } else {
-        // Set brand status and store brand name
-        setBrandStatus();
-        localStorage.setItem("brandName", formData.fullName);
-        router.push("/dashboard");
-      }
+      // The role and related settings will be set by the signup function in AuthContext
+      // The auth context will update isAuthenticated, which will trigger the redirect useEffect
     } catch (err: any) {
       console.error("Registration error:", err);
-      setError(err.response?.data?.message || "Registration failed. Please try again.");
+      setError(err.message || "Registration failed. Please try again.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFacebookLoginError = (err: Error) => {
+    setError(err.message || "Facebook login failed. Please try again.");
   };
 
   return (
@@ -146,6 +156,18 @@ export default function RegisterPage() {
               >
                 Register as Brand
               </button>
+              
+              <div className="flex items-center my-4">
+                <div className="flex-grow border-t border-gray-300"></div>
+                <span className="flex-shrink mx-4 text-gray-600">or</span>
+                <div className="flex-grow border-t border-gray-300"></div>
+              </div>
+              
+              <FacebookLoginButton 
+                className="w-full"
+                buttonText="Sign up with Facebook"
+                onLoginError={handleFacebookLoginError}
+              />
             </div>
           )}
         </div>
@@ -232,6 +254,20 @@ export default function RegisterPage() {
                 >
                   {loading ? "Creating account..." : "Create account"}
                 </button>
+              </div>
+              
+              <div className="flex items-center my-4">
+                <div className="flex-grow border-t border-gray-300"></div>
+                <span className="flex-shrink mx-4 text-gray-600">or</span>
+                <div className="flex-grow border-t border-gray-300"></div>
+              </div>
+              
+              <div>
+                <FacebookLoginButton 
+                  className="w-full"
+                  buttonText="Sign up with Facebook"
+                  onLoginError={handleFacebookLoginError}
+                />
               </div>
 
               <div className="text-center">

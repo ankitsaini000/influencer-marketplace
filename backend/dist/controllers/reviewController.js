@@ -15,7 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteReview = exports.updateReview = exports.getCreatorReviews = exports.createReview = void 0;
 const express_async_handler_1 = __importDefault(require("express-async-handler"));
 const Review_1 = __importDefault(require("../models/Review"));
-const CreatorProfile_1 = __importDefault(require("../models/CreatorProfile"));
+const CreatorProfile_1 = require("../models/CreatorProfile");
 // Helper function to update creator rating after deletion
 const updateCreatorRatingAfterDelete = (creatorId) => __awaiter(void 0, void 0, void 0, function* () {
     // Get all reviews for this creator
@@ -24,7 +24,7 @@ const updateCreatorRatingAfterDelete = (creatorId) => __awaiter(void 0, void 0, 
     const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
     const averageRating = reviews.length > 0 ? totalRating / reviews.length : 0;
     // Update creator profile
-    yield CreatorProfile_1.default.findByIdAndUpdate(creatorId, {
+    yield CreatorProfile_1.CreatorProfile.findByIdAndUpdate(creatorId, {
         rating: parseFloat(averageRating.toFixed(1)),
         reviews: reviews.length
     });
@@ -35,7 +35,7 @@ const updateCreatorRatingAfterDelete = (creatorId) => __awaiter(void 0, void 0, 
 exports.createReview = (0, express_async_handler_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { creatorId, rating, comment } = req.body;
     // Verify the creator exists
-    const creatorExists = yield CreatorProfile_1.default.findById(creatorId);
+    const creatorExists = yield CreatorProfile_1.CreatorProfile.findById(creatorId);
     if (!creatorExists) {
         res.status(404);
         throw new Error('Creator profile not found');
@@ -70,7 +70,7 @@ exports.createReview = (0, express_async_handler_1.default)((req, res) => __awai
 exports.getCreatorReviews = (0, express_async_handler_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const creatorId = req.params.creatorId;
     // Verify the creator exists
-    const creatorExists = yield CreatorProfile_1.default.findById(creatorId);
+    const creatorExists = yield CreatorProfile_1.CreatorProfile.findById(creatorId);
     if (!creatorExists) {
         res.status(404);
         throw new Error('Creator profile not found');

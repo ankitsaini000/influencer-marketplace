@@ -20,6 +20,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+// import { checkUserRole } from '@/services/api';
 
 export const DashboardLayout = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
@@ -27,165 +28,209 @@ export const DashboardLayout = ({ children }: { children: React.ReactNode }) => 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isCreator, setIsCreator] = useState(false);
   const [isBrand, setIsBrand] = useState(false);
-  const { logout, user } = useAuth();
+  const { logout, user, isAuthenticated, checkUserRole } = useAuth();
   const [userName, setUserName] = useState("User");
   const [userEmail, setUserEmail] = useState("user@example.com");
   const [isUserDataLoading, setIsUserDataLoading] = useState(true);
   const [isRoleLoading, setIsRoleLoading] = useState(true);
 
-  // Check user account type
+  // Redirect to login if not authenticated on dashboard pages
   useEffect(() => {
-    setIsRoleLoading(true);
-    
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !isAuthenticated) {
+      // Get current path
+      const path = window.location.pathname;
+      
+      // Check if we're on a protected route
+      const isProtectedRoute = 
+        path.includes('/dashboard') || 
+        path.includes('/creator-dashboard') || 
+        path.includes('/brand-dashboard') ||
+        path.includes('/profile') ||
+        path.includes('/settings') ||
+        path.includes('/messages');
+      
+      // Only redirect if we're on a protected route and not already on login/register
+      if (isProtectedRoute && 
+          !path.includes('/login') && 
+          !path.includes('/register')) {
+        console.log('Not authenticated, redirecting to login');
+        router.push('/login');
+      }
+    }
+  }, [isAuthenticated, router]);
+
+  // Check user account type directly from backend
+  useEffect(() => {
+    const determineUserRole = async () => {
+      setIsRoleLoading(true);
       try {
-        // First check for explicit role indicators
-        const userRole = localStorage.getItem('userRole');
-        const isCreatorRole = userRole === 'creator';
-        const isBrandRole = userRole === 'brand';
-        
-        // Log the initial role check
-        console.log('Initial role check:', { userRole, isCreatorRole, isBrandRole });
-        
-        // Then check additional creator indicators
-        const hasCreatorProfile = localStorage.getItem('creator_profile_exists') === 'true';
-        const justPublished = localStorage.getItem('just_published') === 'true';
-        const creatorUsername = localStorage.getItem('username');
-        
-        // And brand indicators
-        const brandIndicator = localStorage.getItem('is_brand') === 'true';
-        const brandAccountType = localStorage.getItem('account_type') === 'brand';
-        const brandName = localStorage.getItem('brandName');
-        
-        // Check stored user data as a final fallback
-        let userDataRole = null;
-        const userData = localStorage.getItem('user');
-        if (userData) {
-          try {
-            const parsedUser = JSON.parse(userData);
-            userDataRole = parsedUser.role;
-            // If we have user data but no explicit role set, set it now
-            if (parsedUser.role && !userRole) {
-              if (parsedUser.role === 'creator') {
-                localStorage.setItem('userRole', 'creator');
-                localStorage.setItem('creator_profile_exists', 'true');
-                if (parsedUser.username || parsedUser.name) {
-                  localStorage.setItem('username', parsedUser.username || 
-                    parsedUser.name.toLowerCase().replace(/\s+/g, '_'));
-                }
-              } else if (parsedUser.role === 'brand') {
-                localStorage.setItem('userRole', 'brand');
-                localStorage.setItem('is_brand', 'true');
-                localStorage.setItem('account_type', 'brand');
-                if (parsedUser.name) {
-                  localStorage.setItem('brandName', parsedUser.name);
-                }
-              }
-            }
-          } catch (e) {
-            console.error('Error parsing user data:', e);
-          }
+        if (!isAuthenticated) {
+          console.log('User not authenticated, cannot determine role');
+          setIsCreator(false);
+          setIsBrand(false);
+          setIsRoleLoading(false);
+          return;
         }
         
-        // Determine account types with clear precedence
-        // Priority: explicit role > specific indicators > user data
+        console.log('Checking user role directly from backend...');
+        const role = await checkUserRole();
+        console.log('Role determined from backend:', role);
         
-        // Is this a brand?
-        const brandStatus = isBrandRole || brandIndicator || brandAccountType || userDataRole === 'brand';
-        setIsBrand(brandStatus);
-        
-        // Is this a creator? (and not a brand)
-        const creatorStatus = !brandStatus && (
-          isCreatorRole || 
-          hasCreatorProfile || 
-          justPublished || 
-          (creatorUsername && creatorUsername.length > 0) ||
-          userDataRole === 'creator'
-        );
-        setIsCreator(creatorStatus);
-        
-        // Extensive logging for debugging
-        console.log('Account status determination:', { 
-          // Creator indicators
-          hasCreatorProfile,
-          justPublished,
-          creatorUsername,
-          isCreatorRole,
-          // Brand indicators
-          brandIndicator,
-          brandAccountType, 
-          brandName,
-          isBrandRole,
-          // User data
-          userDataRole,
-          // Final determination
-          isBrand: brandStatus,
-          isCreator: creatorStatus 
-        });
+        if (role === 'creator') {
+          console.log('Setting role as creator');
+          setIsCreator(true);
+          setIsBrand(false);
+        } else if (role === 'brand') {
+          console.log('Setting role as brand');
+          setIsBrand(true);
+          setIsCreator(false);
+        } else {
+          console.log('No specific role found or role is client/user');
+          setIsCreator(false);
+          setIsBrand(false);
+        }
       } catch (error) {
-        console.error('Error checking account type:', error);
+        console.error('Error determining user role:', error);
+        // Fall back to localStorage as a last resort
+        checkLocalStorageRoles();
       } finally {
         setIsRoleLoading(false);
       }
-    }
-  }, []);
+    };
+    
+    const checkLocalStorageRoles = () => {
+      if (typeof window !== 'undefined') {
+        try {
+          // First check for explicit role indicators
+          const userRole = localStorage.getItem('userRole');
+          const isCreatorRole = userRole === 'creator';
+          const isBrandRole = userRole === 'brand';
+          
+          // Log the initial role check
+          console.log('Initial role check:', { userRole, isCreatorRole, isBrandRole });
+          
+          // Then check additional creator indicators
+          const hasCreatorProfile = localStorage.getItem('creator_profile_exists') === 'true';
+          const justPublished = localStorage.getItem('just_published') === 'true';
+          const creatorUsername = localStorage.getItem('username');
+          
+          // And brand indicators
+          const brandIndicator = localStorage.getItem('is_brand') === 'true';
+          const brandAccountType = localStorage.getItem('account_type') === 'brand';
+          const brandName = localStorage.getItem('brandName');
+          
+          // Check stored user data as a final fallback
+          let userDataRole = null;
+          const userData = localStorage.getItem('user');
+          if (userData) {
+            try {
+              const parsedUser = JSON.parse(userData);
+              userDataRole = parsedUser.role;
+            } catch (e) {
+              console.error('Error parsing user data:', e);
+            }
+          }
+          
+          // Determine account types with clear precedence
+          // Priority: explicit role > specific indicators > user data
+          
+          // Is this a brand?
+          const brandStatus = isBrandRole || brandIndicator || brandAccountType || userDataRole === 'brand';
+          setIsBrand(brandStatus);
+          
+          // Is this a creator? (and not a brand)
+          const creatorStatus = !brandStatus && (
+            isCreatorRole || 
+            hasCreatorProfile || 
+            justPublished || 
+            (creatorUsername && creatorUsername.length > 0) ||
+            userDataRole === 'creator'
+          );
+          setIsCreator(creatorStatus);
+          
+          // Extensive logging for debugging
+          console.log('Account status determination:', { 
+            // Creator indicators
+            hasCreatorProfile,
+            justPublished,
+            creatorUsername,
+            isCreatorRole,
+            // Brand indicators
+            brandIndicator,
+            brandAccountType, 
+            brandName,
+            isBrandRole,
+            // User data
+            userDataRole,
+            // Final determination
+            isBrand: brandStatus,
+            isCreator: creatorStatus 
+          });
+        } catch (error) {
+          console.error('Error checking account type:', error);
+        }
+      }
+    };
+    
+    // Only run this when authenticated status changes
+    determineUserRole();
+  }, [isAuthenticated, checkUserRole]);
 
   // Get user data from localStorage or API for profile display
   useEffect(() => {
-    const loadUserData = () => {
+    const loadUserData = async () => {
       if (typeof window !== 'undefined') {
         try {
-          // First, try to get user data directly from localStorage (set during login/signup)
-          const userFullName = localStorage.getItem('fullName');
-          const userDisplayName = localStorage.getItem('displayName');
-          const firstName = localStorage.getItem('firstName');
-          const lastName = localStorage.getItem('lastName');
-          const name = localStorage.getItem('name');
-          const email = localStorage.getItem('email');
+          setIsUserDataLoading(true);
           
-          // Set the name with priority order
-          if (userFullName) {
-            setUserName(userFullName);
-          } else if (userDisplayName) {
-            setUserName(userDisplayName);
-          } else if (firstName && lastName) {
-            setUserName(`${firstName} ${lastName}`);
-          } else if (firstName) {
-            setUserName(firstName);
-          } else if (name) {
-            setUserName(name);
-          } else if (localStorage.getItem('username')) {
-            setUserName(localStorage.getItem('username') || "User");
+          // Check if user is logged in from auth context
+          if (!isAuthenticated || !user) {
+            console.log('User not authenticated, showing guest info');
+            setUserName("Guest");
+            setUserEmail("guest@gmail.com");
+            setIsUserDataLoading(false);
+            return;
           }
           
-          // Set the email if available
-          if (email) {
-            setUserEmail(email);
+          // We have authenticated user from context
+          console.log('User authenticated, loading profile data', user);
+          
+          // Set data from user context
+          if (user.fullName) {
+            setUserName(user.fullName);
+          } else if (user.email) {
+            setUserName(user.email.split('@')[0]);
           }
           
-          // Try to get user data from userData object in localStorage
-          const userDataStr = localStorage.getItem('userData');
-          if (userDataStr) {
+          if (user.email) {
+            setUserEmail(user.email);
+          }
+          
+          // Try to fetch more complete user data if needed
+          if (!user.fullName) {
             try {
-              const userData = JSON.parse(userDataStr);
-              
-              // If no name was found earlier, try from userData
-              if (!userFullName && !userDisplayName && !firstName && !name) {
-                if (userData.fullName) setUserName(userData.fullName);
-                else if (userData.name) setUserName(userData.name);
-                else if (userData.displayName) setUserName(userData.displayName);
-                else if (userData.firstName && userData.lastName) 
-                  setUserName(`${userData.firstName} ${userData.lastName}`);
-                else if (userData.firstName) setUserName(userData.firstName);
-                else if (userData.username) setUserName(userData.username);
+              const token = localStorage.getItem('token');
+              if (token) {
+                const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/users/profile`, {
+                  headers: {
+                    'Authorization': `Bearer ${token}`
+                  }
+                });
+                
+                if (response.ok) {
+                  const userData = await response.json();
+                  if (userData.fullName) {
+                    setUserName(userData.fullName);
+                    localStorage.setItem('fullName', userData.fullName);
+                  }
+                  if (userData.email) {
+                    setUserEmail(userData.email);
+                    localStorage.setItem('email', userData.email);
+                  }
+                }
               }
-              
-              // If no email was found earlier, try from userData
-              if (!email && userData.email) {
-                setUserEmail(userData.email);
-              }
-            } catch (e) {
-              console.error('Error parsing userData:', e);
+            } catch (error) {
+              console.error('Error fetching user profile:', error);
             }
           }
         } catch (error) {
@@ -197,36 +242,13 @@ export const DashboardLayout = ({ children }: { children: React.ReactNode }) => 
     };
     
     loadUserData();
-  }, []);
+  }, [user, isAuthenticated]);
 
   const handleLogout = () => {
-    // Clear all authentication related data
-    if (typeof window !== 'undefined') {
-      // Auth tokens
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      
-      // Creator-specific data
-      localStorage.removeItem('creator_profile_exists');
-      localStorage.removeItem('just_published');
-      localStorage.removeItem('username');
-      localStorage.removeItem('userRole');
-      
-      // Brand-specific data
-      localStorage.removeItem('is_brand');
-      localStorage.removeItem('account_type');
-      localStorage.removeItem('brandName');
-      
-      // Any profile data with creator_ prefix
-      const username = localStorage.getItem('username');
-      if (username) {
-        localStorage.removeItem(`creator_${username}`);
-      }
-      
-      console.log('User logged out, all auth data cleared');
-    }
+    // Use the logout function from AuthContext
+    logout();
     
-    // Redirect to login page instead of home page
+    // Redirect to login page
     router.push("/login");
   };
 
@@ -248,7 +270,7 @@ export const DashboardLayout = ({ children }: { children: React.ReactNode }) => 
     { name: "Find Creators", href: "/find-creators", icon: Search },
     { name: "Available Promotions", href: "/available-promotions", icon: Megaphone },
     { name: "Messages", href: "/messages", icon: MessageSquare },
-    { name: "Likes", href: "/likes", icon: Heart },
+    { name: "Likes", href: "/liked-creators", icon: Heart },
     { name: "Profile", href: "/profile", icon: User },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
@@ -330,7 +352,7 @@ export const DashboardLayout = ({ children }: { children: React.ReactNode }) => 
           <div className="mt-auto pt-6 border-t border-gray-100">
             <div className="flex items-center gap-3 p-3">
               <div className="relative w-10 h-10 rounded-full overflow-hidden">
-                {user?.avatar ? (
+                {isAuthenticated && user?.avatar ? (
                   <Image
                     src={user.avatar}
                     alt="User avatar"
@@ -343,7 +365,7 @@ export const DashboardLayout = ({ children }: { children: React.ReactNode }) => 
                     <User className="w-5 h-5 text-purple-600" />
                   </div>
                 )}
-                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 border-2 border-white rounded-full"></span>
+                <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 ${isAuthenticated ? 'bg-green-500' : 'bg-gray-400'} border-2 border-white rounded-full`}></span>
               </div>
               <div className="flex-1 min-w-0">
                 {isUserDataLoading ? (
@@ -354,21 +376,31 @@ export const DashboardLayout = ({ children }: { children: React.ReactNode }) => 
                 ) : (
                   <>
                     <h2 className="text-sm font-medium text-gray-900 truncate">
-                      {userName}
+                      {isAuthenticated ? userName : "Guest"}
                     </h2>
                     <p className="text-xs text-gray-500 truncate">
-                      {userEmail}
+                      {isAuthenticated ? userEmail : "guest@gmail.com"}
                     </p>
                   </>
                 )}
               </div>
-              <button 
-                onClick={handleLogout}
-                className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
-                title="Sign out"
-              >
-                <LogOut className="w-5 h-5" />
-              </button>
+              {isAuthenticated ? (
+                <button 
+                  onClick={handleLogout}
+                  className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
+                  title="Sign out"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
+              ) : (
+                <Link 
+                  href="/login"
+                  className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
+                  title="Sign in"
+                >
+                  <div className="w-5 h-5 flex items-center justify-center text-sm font-bold">→</div>
+                </Link>
+              )}
             </div>
           </div>
         </div>

@@ -5,34 +5,54 @@ import { useRouter } from 'next/navigation';
 import { Button } from '../ui/button';
 import { ArrowRight, ArrowLeft, Plus, Trash2, Check } from 'lucide-react';
 import { OnboardingProgressBar } from '../OnboardingProgressBar';
+import { toast } from 'react-hot-toast';
+import { useCreatorProfileStore } from '../../store/creatorProfileStore';
+import { savePricing } from '../../services/creatorApi';
+
+// Define types for the pricing packages
+interface PricingPackage {
+  name: string;
+  price: number;
+  description: string;
+  deliveryTime: number;
+  revisions: number;
+  features: string[];
+}
+
+interface PricingPackages {
+  basic: PricingPackage;
+  standard: PricingPackage;
+  premium: PricingPackage;
+}
 
 export const CreatorPricing = () => {
   const router = useRouter();
+  const { updateCurrentProfile } = useCreatorProfileStore();
   
-  const [packages, setPackages] = useState({
+  const [packages, setPackages] = useState<PricingPackages>({
     basic: {
-      name: 'Basic',
-      price: 50,
-      description: 'Entry-level service that covers the basics of what you need.',
-      deliveryTime: 3,
-      revisions: 1,
-      features: ['Basic service', 'Limited revisions', 'Standard delivery']
+      name: '',
+      price: 0,
+      description: '',
+      deliveryTime: 1,
+      revisions: 0,
+      features: []
     },
     standard: {
-      name: 'Standard',
-      price: 100,
-      description: 'Comprehensive service with faster delivery and more features.',
-      deliveryTime: 2,
-      revisions: 2,
-      features: ['Everything in Basic', 'Additional revisions', 'Faster delivery', 'Premium support']
+      name: '',
+      price: 0,
+      description: '',
+      deliveryTime: 1,
+      revisions: 0,
+      features: []
     },
     premium: {
-      name: 'Premium',
-      price: 200,
-      description: 'Complete premium package with all features and fastest delivery.',
+      name: '',
+      price: 0,
+      description: '',
       deliveryTime: 1,
-      revisions: 3,
-      features: ['Everything in Standard', 'Priority service', 'Express delivery', 'Unlimited revisions', 'VIP support']
+      revisions: 0,
+      features: []
     }
   });
   
@@ -41,6 +61,7 @@ export const CreatorPricing = () => {
   const [activePackage, setActivePackage] = useState<'basic' | 'standard' | 'premium'>('basic');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     // Load existing data from local storage if available
@@ -107,16 +128,40 @@ export const CreatorPricing = () => {
     return Object.keys(newErrors).length === 0;
   };
   
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (validatePricing()) {
       setIsSubmitting(true);
+      setApiError(null);
       
-      // Save to local storage
-      localStorage.setItem('creatorPricing', JSON.stringify({ packages }));
-      
-      // Navigate to the next step
-      router.push('/creator-setup/gallery-portfolio');
-      setIsSubmitting(false);
+      try {
+        // Prepare the data for the API
+        const pricingData = {
+          packages,
+          customOffers
+        };
+        
+        // Log the data being sent to the database
+        console.log('Saving pricing data to database:', pricingData);
+        
+        // Save to database using the API function
+        const response = await savePricing(pricingData);
+        console.log('Pricing data saved successfully to MongoDB:', response);
+        
+        // Update store
+        updateCurrentProfile('pricing', pricingData);
+        
+        // Show success message
+        toast.success('Pricing information saved successfully to the database!');
+        
+        // Navigate to the next step
+        router.push('/creator-setup/gallery-portfolio');
+      } catch (error: any) {
+        console.error('Error saving pricing data to database:', error);
+        setApiError(error.message || 'Failed to save pricing data. Please try again.');
+        toast.error('Failed to save pricing data. Please try again.');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -284,6 +329,13 @@ export const CreatorPricing = () => {
               </label>
             </div>
           </div>
+          
+          {/* API Error Message */}
+          {apiError && (
+            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+              {apiError}
+            </div>
+          )}
         </div>
         
         {/* Navigation Buttons */}

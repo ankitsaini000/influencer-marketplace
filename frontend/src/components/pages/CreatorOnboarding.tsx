@@ -1,17 +1,47 @@
 'use client';
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "../layout/Header";
 import { Footer } from "../layout/Footer";
 import { Play } from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
 
 export const CreatorOnboarding = () => {
   const router = useRouter();
+  const { isAuthenticated, user } = useAuth();
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Scroll to top
     window.scrollTo(0, 0);
-  }, []);
+
+    // Check authentication and creator role
+    if (typeof window !== 'undefined') {
+      if (!isAuthenticated) {
+        console.log('User not authenticated, redirecting to login');
+        router.push('/login');
+        return;
+      }
+
+      const userRole = localStorage.getItem('userRole');
+      if (userRole !== 'creator') {
+        console.log('User is not a creator, redirecting to dashboard');
+        router.push('/dashboard');
+        return;
+      }
+
+      setIsLoading(false);
+    }
+  }, [isAuthenticated, router]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white">

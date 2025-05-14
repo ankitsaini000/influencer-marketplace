@@ -1,112 +1,318 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-const mongoose_1 = __importStar(require("mongoose"));
-const creatorProfileSchema = new mongoose_1.Schema({
+exports.CreatorProfile = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
+const creatorProfileSchema = new mongoose_1.default.Schema({
     userId: {
-        type: mongoose_1.Schema.Types.ObjectId,
-        required: true,
-        ref: 'User'
+        type: mongoose_1.default.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     },
-    overview: {
-        title: { type: String, default: '' },
-        category: { type: String, default: '' },
-        subcategory: { type: String, default: '' }
-    },
-    pricing: {
-        basic: { type: Number, default: 0 },
-        standard: { type: Number, default: 0 },
-        premium: { type: Number, default: 0 }
-    },
-    description: { type: String, default: '' },
-    requirements: [{ type: String }],
-    gallery: [{ type: String }],
-    social: {
-        website: { type: String },
-        instagram: { type: String },
-        twitter: { type: String },
-        facebook: { type: String },
-        linkedin: { type: String },
-        youtube: { type: String },
-        otherLinks: [{
-                title: { type: String },
-                url: { type: String }
-            }]
+    profileUrl: {
+        type: String,
+        unique: true,
+        sparse: true
     },
     status: {
         type: String,
-        enum: ['published', 'draft', 'pending'],
+        enum: ['draft', 'published', 'suspended'],
         default: 'draft'
     },
-    isVerified: {
-        type: Boolean,
-        default: false
+    onboardingStep: {
+        type: String,
+        enum: ['personal-info', 'professional-info', 'description-faq', 'social-media', 'pricing', 'gallery-portfolio', 'publish'],
+        default: 'personal-info'
     },
-    rating: {
-        type: Number,
-        default: 5.0
-    },
-    reviews: {
-        type: Number,
-        default: 0
-    },
-    avatar: {
-        type: String
-    },
-    metadata: {
-        personalInfo: {
-            fullName: String,
-            username: { type: String, unique: true, sparse: true },
-            profileImage: String,
-            bio: String,
-            location: String,
-            languages: [String],
-            skills: [String]
+    // 1. Personal Info Page
+    personalInfo: {
+        firstName: { type: String, required: false, trim: true },
+        lastName: { type: String, required: false, trim: true },
+        username: { type: String, required: false, trim: true, unique: true, sparse: true },
+        bio: { type: String, required: false },
+        profileImage: { type: String, required: false },
+        coverImage: { type: String, required: false },
+        dateOfBirth: Date,
+        gender: String,
+        email: String,
+        phone: String,
+        location: {
+            city: String,
+            state: String,
+            country: String,
+            address: String,
+            postalCode: String
         },
-        type: mongoose_1.Schema.Types.Mixed,
-        default: {}
-    }
+        languages: [{
+                language: { type: String, required: true },
+                proficiency: { type: String, required: true }
+            }],
+        isEmailVerified: { type: Boolean, default: false },
+        isPhoneVerified: { type: Boolean, default: false }
+    },
+    // 2. Professional Info Page
+    professionalInfo: {
+        title: String,
+        category: String,
+        subcategory: String,
+        yearsExperience: Number,
+        expertise: [String],
+        skills: [{
+                skill: String,
+                level: { type: String, enum: ['beginner', 'intermediate', 'advanced', 'expert'] }
+            }],
+        tags: [String],
+        awards: [{
+                name: String,
+                awardedBy: String,
+                year: Number
+            }],
+        certifications: [{
+                name: String,
+                issuedBy: String,
+                year: Number,
+                url: String
+            }],
+        education: [{
+                institution: String,
+                degree: String,
+                fieldOfStudy: String,
+                startYear: Number,
+                endYear: Number
+            }],
+        experience: [{
+                title: String,
+                company: String,
+                location: String,
+                startDate: Date,
+                endDate: Date,
+                description: String,
+                isCurrent: Boolean
+            }],
+        eventAvailability: {
+            available: Boolean,
+            eventTypes: [String],
+            pricing: String,
+            requirements: String,
+            travelWillingness: Boolean,
+            preferredLocations: [String],
+            leadTime: Number
+        }
+    },
+    // 3. Description & FAQ Page
+    descriptionFaq: {
+        briefDescription: String,
+        longDescription: String,
+        faqs: [{
+                question: String,
+                answer: String
+            }],
+        specialties: [String],
+        workProcess: String
+    },
+    // 4. Social Media Page
+    socialMedia: {
+        socialProfiles: {
+            instagram: {
+                url: String,
+                handle: String,
+                followers: Number
+            },
+            youtube: {
+                url: String,
+                handle: String,
+                subscribers: Number
+            },
+            tiktok: {
+                url: String,
+                handle: String,
+                followers: Number
+            },
+            twitter: {
+                url: String,
+                handle: String,
+                followers: Number
+            },
+            facebook: {
+                url: String,
+                handle: String,
+                followers: Number
+            },
+            linkedin: {
+                url: String,
+                handle: String,
+                connections: Number
+            },
+            website: {
+                url: String
+            }
+        },
+        totalReach: { type: Number, default: 0 },
+        primaryPlatform: String,
+        audienceDemographics: {
+            ageRanges: [String],
+            topCountries: [String],
+            genderBreakdown: {
+                male: Number,
+                female: Number,
+                other: Number
+            }
+        }
+    },
+    // 5. Pricing Page
+    pricing: {
+        currency: { type: String, default: 'USD' },
+        basic: {
+            price: { type: Number, default: 0 },
+            title: String,
+            description: String,
+            deliverables: [String],
+            revisions: { type: Number, default: 1 },
+            deliveryTime: { type: Number, default: 7 },
+            isActive: { type: Boolean, default: true }
+        },
+        standard: {
+            price: { type: Number, default: 0 },
+            title: String,
+            description: String,
+            deliverables: [String],
+            revisions: { type: Number, default: 2 },
+            deliveryTime: { type: Number, default: 7 },
+            isActive: { type: Boolean, default: true }
+        },
+        premium: {
+            price: { type: Number, default: 0 },
+            title: String,
+            description: String,
+            deliverables: [String],
+            revisions: { type: Number, default: 3 },
+            deliveryTime: { type: Number, default: 7 },
+            isActive: { type: Boolean, default: true }
+        },
+        customPackages: { type: Boolean, default: false },
+        customPackageDescription: String,
+        paymentTerms: String,
+        discountPolicies: String
+    },
+    // 6. Gallery & Portfolio Page
+    gallery: {
+        images: [{
+                url: String,
+                title: String,
+                description: String,
+                sortOrder: Number,
+                thumbnailUrl: String,
+                tags: [String],
+                uploadedAt: { type: Date, default: Date.now }
+            }],
+        videos: [{
+                url: String,
+                title: String,
+                description: String,
+                thumbnailUrl: String,
+                sortOrder: Number,
+                tags: [String],
+                uploadedAt: { type: Date, default: Date.now }
+            }]
+    },
+    // Gallery Portfolio (more modern version of gallery)
+    galleryPortfolio: {
+        images: [{
+                url: String,
+                title: String,
+                description: String,
+                tags: [String],
+                order: Number,
+            }],
+        videos: [{
+                url: String,
+                title: String,
+                description: String,
+                thumbnail: String,
+                tags: [String],
+                order: Number,
+            }],
+        featured: [String]
+    },
+    // Explicit portfolio field to store portfolio items
+    portfolio: [{
+            id: String,
+            title: String,
+            image: String,
+            category: String,
+            client: String,
+            description: String,
+            isVideo: Boolean,
+            videoUrl: String,
+            promotionType: String,
+            clientFeedback: String,
+            projectDate: String,
+            results: String,
+            tags: [String],
+            sortOrder: Number
+        }],
+    // 7. Publish Page
+    publishInfo: {
+        isPublished: { type: Boolean, default: false },
+        publishedAt: Date,
+        featured: { type: Boolean, default: false },
+        isVerified: { type: Boolean, default: false },
+        emailVerified: { type: Boolean, default: false },
+        phoneVerified: { type: Boolean, default: false }
+    },
+    // Additional Useful Fields
+    availability: {
+        timezone: String,
+        generalAvailability: [{
+                day: { type: String, enum: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] },
+                available: Boolean,
+                hours: [String]
+            }],
+        unavailableDates: [Date],
+        responseTime: String,
+        bookingNotice: Number
+    },
+    // Stats & Metrics
+    metrics: {
+        profileViews: { type: Number, default: 0 },
+        profileCompleteness: { type: Number, default: 0 },
+        averageResponseTime: { type: Number, default: 0 },
+        ratings: {
+            average: { type: Number, default: 0 },
+            count: { type: Number, default: 0 },
+            distribution: {
+                5: { type: Number, default: 0 },
+                4: { type: Number, default: 0 },
+                3: { type: Number, default: 0 },
+                2: { type: Number, default: 0 },
+                1: { type: Number, default: 0 }
+            }
+        },
+        projectsCompleted: { type: Number, default: 0 },
+        repeatClientRate: { type: Number, default: 0 },
+        lastActive: Date
+    },
+    // Track completion status for each section
+    completionStatus: {
+        personalInfo: { type: Boolean, default: false },
+        professionalInfo: { type: Boolean, default: false },
+        descriptionFaq: { type: Boolean, default: false },
+        socialMedia: { type: Boolean, default: false },
+        pricing: { type: Boolean, default: false },
+        galleryPortfolio: { type: Boolean, default: false }
+    },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
 }, {
     timestamps: true
 });
-// Create indexes for better query performance
-creatorProfileSchema.index({ userId: 1 });
-creatorProfileSchema.index({ 'overview.category': 1 });
-creatorProfileSchema.index({ 'overview.subcategory': 1 });
-creatorProfileSchema.index({ status: 1 });
-creatorProfileSchema.index({ rating: -1 });
-creatorProfileSchema.index({ 'metadata.personalInfo.username': 1 }, { unique: true, sparse: true });
-const CreatorProfile = mongoose_1.default.model('CreatorProfile', creatorProfileSchema);
-exports.default = CreatorProfile;
+// Pre-save hook to generate profile URL
+creatorProfileSchema.pre('save', function (next) {
+    if (this.personalInfo && this.personalInfo.username) {
+        this.profileUrl = `/creator/${this.personalInfo.username}`;
+    }
+    next();
+});
+exports.CreatorProfile = mongoose_1.default.model('CreatorProfile', creatorProfileSchema);

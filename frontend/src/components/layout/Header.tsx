@@ -19,7 +19,14 @@ interface UserMenuProps {
 
 // Add UserMenu component
 const UserMenu = ({ isOpen, onClose, onLogout, onSettings }: UserMenuProps) => {
+  const router = useRouter();
+  
   if (!isOpen) return null;
+
+  const handleLikedCreatorsClick = () => {
+    router.push('/liked-creators');
+    onClose();
+  };
 
   return (
     <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 border">
@@ -28,6 +35,12 @@ const UserMenu = ({ isOpen, onClose, onLogout, onSettings }: UserMenuProps) => {
         className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
       >
         Settings
+      </button>
+      <button
+        onClick={handleLikedCreatorsClick}
+        className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+      >
+        Liked Creators
       </button>
       <button
         onClick={onLogout}

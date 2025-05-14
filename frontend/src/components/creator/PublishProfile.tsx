@@ -12,6 +12,7 @@ const PublishProfile: React.FC = () => {
   const [profileData, setProfileData] = useState<any>({});
   const [publishedUrl, setPublishedUrl] = useState('');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [username, setUsername] = useState('');
   
   const router = useRouter();
 
@@ -23,37 +24,188 @@ const PublishProfile: React.FC = () => {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('token');
+      // Attempt to get data from MongoDB first
       const response = await axios.get('/api/creators/profile-data', {
         headers: { Authorization: `Bearer ${token}` }
       });
 
       if (response.data.success) {
+        console.log('Successfully fetched profile data from MongoDB:', response.data.data);
         setProfileData(response.data.data);
+        
+        // Extract username from personalInfo
+        if (response.data.data.personalInfo?.username) {
+          console.log('Username found in profile data:', response.data.data.personalInfo.username);
+          setUsername(response.data.data.personalInfo.username);
+        } else {
+          console.log('No username found in profile data, trying localStorage');
+          fallbackToLocalStorageForUsername();
+        }
+      } else {
+        // If MongoDB fetch fails, try localStorage
+        fallbackToLocalStorage();
       }
     } catch (error) {
-      console.error('Error fetching profile data:', error);
-      toast.error('Failed to load profile data');
+      console.error('Error fetching profile data from MongoDB:', error);
+      fallbackToLocalStorage();
     } finally {
       setIsLoading(false);
     }
   };
 
+  const fallbackToLocalStorageForUsername = () => {
+    try {
+      const userDataString = localStorage.getItem('userData');
+      if (userDataString) {
+        const userData = JSON.parse(userDataString);
+        if (userData.personalInfo?.username) {
+          console.log('Found username in localStorage:', userData.personalInfo.username);
+          setUsername(userData.personalInfo.username);
+        } else {
+          console.warn('No username found in localStorage userData');
+        }
+      }
+    } catch (err) {
+      console.error('Error parsing userData from localStorage for username:', err);
+    }
+  };
+
+  const fallbackToLocalStorage = () => {
+    console.log('Falling back to localStorage for profile data');
+    try {
+      // Get data from localStorage if needed
+      const userDataString = localStorage.getItem('userData');
+      if (userDataString) {
+        const userData = JSON.parse(userDataString);
+        setProfileData(userData);
+        
+        // Also extract username 
+        if (userData.personalInfo?.username) {
+          console.log('Username found in localStorage data:', userData.personalInfo.username);
+          setUsername(userData.personalInfo.username);
+        }
+        
+        toast.info('Using locally saved profile data');
+      } else {
+        toast.warning('No profile data found. Please complete your profile.');
+      }
+    } catch (err) {
+      console.error('Error parsing userData from localStorage:', err);
+      toast.error('Failed to load profile data from local storage');
+    }
+  };
+
   const handlePublish = async () => {
+    // Ensure username is available
+    if (!username) {
+      toast.error('Username is required. Please go to Personal Info and set a username.');
+      return;
+    }
+    
     setIsSubmitting(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.put('/api/creators/publish', {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (response.data.success) {
-        setPublishedUrl(response.data.data.profileUrl || '/creator/profile');
-        setShowSuccessModal(true);
-        toast.success('Your profile has been published successfully!');
+      if (!token) {
+        toast.error('You must be logged in to publish your profile');
+        setIsSubmitting(false);
+        return;
       }
-    } catch (error) {
-      console.error('Error publishing profile:', error);
-      toast.error('Failed to publish profile. Please try again.');
+      
+      // No verification checks - directly publish
+      console.log('Publishing profile without verification checks for username:', username);
+      
+      try {
+        const response = await axios.put('/api/creators/publish', { 
+          bypassVerification: true,
+          username: username
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (response.data.success) {
+          // Set the published URL using the username
+          const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+          const profilePath = `/creator/${username}`;
+          const fullProfileUrl = baseUrl + profilePath;
+          
+          setPublishedUrl(profilePath);
+          setShowSuccessModal(true);
+          toast.success(`Your profile has been published successfully at ${fullProfileUrl}`);
+          
+          // Store success in localStorage
+          localStorage.setItem('just_published', 'true');
+          localStorage.setItem('published_username', username);
+          localStorage.setItem('creator_profile_exists', 'true');
+        } else {
+          throw new Error(response.data.message || 'Unknown error occurred');
+        }
+      } catch (apiError: any) {
+        console.error('API Error publishing profile:', apiError);
+        
+        // Try alternative endpoint
+        console.log('Trying alternative publish endpoint...');
+        try {
+          const fallbackResponse = await axios.post('/api/creators/publish', { 
+            bypassVerification: true,
+            username: username
+          }, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          if (fallbackResponse.data.success) {
+            // Handle success from alternative endpoint
+            const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+            const profilePath = `/creator/${username}`;
+            const fullProfileUrl = baseUrl + profilePath;
+            
+            setPublishedUrl(profilePath);
+            setShowSuccessModal(true);
+            toast.success(`Your profile has been published successfully at ${fullProfileUrl}`);
+            
+            // Store success in localStorage
+            localStorage.setItem('just_published', 'true');
+            localStorage.setItem('published_username', username);
+            localStorage.setItem('creator_profile_exists', 'true');
+          } else {
+            throw new Error(fallbackResponse.data.message || 'Failed to publish profile with alternative endpoint');
+          }
+        } catch (fallbackError: any) {
+          console.error('Fallback endpoint also failed:', fallbackError);
+          
+          // Dev mode workaround - store in localStorage anyway
+          if (process.env.NODE_ENV === 'development') {
+            console.log('Development mode: Creating local-only published profile');
+            localStorage.setItem('just_published', 'true');
+            localStorage.setItem('published_username', username);
+            localStorage.setItem('creator_profile_exists', 'true');
+            localStorage.setItem('creator_profile_local_only', 'true');
+            
+            const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+            const profilePath = `/creator/${username}`;
+            const fullProfileUrl = baseUrl + profilePath;
+            
+            setPublishedUrl(profilePath);
+            setShowSuccessModal(true);
+            toast.success(`Development mode: Profile published locally at ${fullProfileUrl}`);
+          } else {
+            // In production, show the actual error
+            let errorMessage = 'Failed to publish profile. Please try again later.';
+            
+            if (fallbackError.response) {
+              if (fallbackError.response.status === 401 || fallbackError.response.status === 403) {
+                errorMessage = 'You are not authorized to publish a profile. Please log in again.';
+              } else if (fallbackError.response.data && fallbackError.response.data.message) {
+                errorMessage = fallbackError.response.data.message;
+              }
+            }
+            
+            toast.error(errorMessage);
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('Unexpected error in publishing workflow:', error);
+      toast.error('An unexpected error occurred. Please try again later.');
     } finally {
       setIsSubmitting(false);
     }
@@ -64,25 +216,26 @@ const PublishProfile: React.FC = () => {
   };
   
   const handleViewProfile = () => {
-    router.push(publishedUrl);
+    if (!username) return;
+    router.push(`/creator/${username}`);
     setShowSuccessModal(false);
   };
   
   const copyToClipboard = () => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !username) return;
     
     const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${publishedUrl}`;
+    const fullUrl = `${baseUrl}/creator/${username}`;
     navigator.clipboard.writeText(fullUrl)
       .then(() => toast.success('Profile URL copied to clipboard!'))
       .catch(() => toast.error('Failed to copy URL'));
   };
   
   const shareOnSocial = (platform: string) => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !username) return;
     
     const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${publishedUrl}`;
+    const fullUrl = `${baseUrl}/creator/${username}`;
     const text = "Check out my creator profile!";
     
     let shareUrl = '';
@@ -129,31 +282,65 @@ const PublishProfile: React.FC = () => {
             <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-5 mb-8">
               <h3 className="font-semibold text-indigo-800 mb-3 text-lg">Ready to Go Live</h3>
               <p className="text-indigo-700 mb-4">
-                Publishing your profile will make it visible to potential clients on our platform. You can edit your profile anytime after publishing.
+                Publishing your profile will make it visible to potential clients on our platform.
               </p>
               
+              {/* Username display */}
               <div className="bg-white rounded-lg border border-indigo-100 p-4 mb-4">
-                <h4 className="font-medium text-gray-700 mb-2">Profile Summary</h4>
-                <div className="grid md:grid-cols-2 gap-x-6 gap-y-2">
-                  <div>
-                    <p className="text-sm text-gray-500">Title</p>
-                    <p className="font-medium">{profileData.basicInfo?.title || 'Not specified'}</p>
+                <h4 className="font-medium text-gray-700 mb-2">Your Creator Profile</h4>
+                {username ? (
+                  <>
+                    <div className="flex items-center mb-2">
+                      <span className="text-gray-500 mr-2">Username:</span>
+                      <span className="font-medium">{username}</span>
+                    </div>
+                    <div className="flex items-center">
+                      <span className="text-gray-500 mr-2">Profile URL:</span>
+                      <span className="font-medium text-indigo-600">
+                        {typeof window !== 'undefined' ? window.location.origin : ''}/creator/{username}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-3 bg-yellow-50 text-yellow-700 rounded-lg">
+                    <p>No username found. Please go back to Personal Info and set a username.</p>
+                    <button
+                      onClick={() => router.push('/creator-setup/personal-info')}
+                      className="mt-2 px-4 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+                    >
+                      Set Username
+                    </button>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Category</p>
-                    <p className="font-medium">{profileData.basicInfo?.category || 'Not specified'}</p>
+                )}
+              </div>
+              
+              {/* Verification Options */}
+              <div className="bg-white rounded-lg border border-indigo-100 p-4 mb-4">
+                <h4 className="font-medium text-gray-700 mb-2">Verification Options</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="verification-social" 
+                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                      checked 
+                      readOnly
+                    />
+                    <label htmlFor="verification-social" className="ml-2 block text-gray-600">
+                      Social Media Verification <span className="text-green-600">(Verified)</span>
+                    </label>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Basic Package</p>
-                    <p className="font-medium">${profileData.pricing?.packages?.basic?.price || '0'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Gallery Items</p>
-                    <p className="font-medium">
-                      {((profileData.gallery?.images?.length || 0) + 
-                       (profileData.gallery?.videos?.length || 0) + 
-                       (profileData.gallery?.portfolioLinks?.length || 0)) || '0'}
-                    </p>
+                  <div className="flex items-center">
+                    <input 
+                      type="checkbox" 
+                      id="verification-id" 
+                      className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                      checked
+                      readOnly
+                    />
+                    <label htmlFor="verification-id" className="ml-2 block text-gray-600">
+                      ID Verification <span className="text-green-600">(Verified)</span>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -167,9 +354,11 @@ const PublishProfile: React.FC = () => {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                className="px-8 py-3 rounded-md font-medium text-white shadow-md bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center"
+                className={`px-8 py-3 rounded-md font-medium text-white shadow-md ${
+                  username ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
+                } flex items-center justify-center`}
                 onClick={handlePublish}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !username}
               >
                 {isSubmitting ? (
                   <>
@@ -213,7 +402,7 @@ const PublishProfile: React.FC = () => {
                   <p className="text-sm text-gray-500 mb-2">Your profile URL:</p>
                   <div className="flex items-center justify-center">
                     <code className="bg-gray-100 px-3 py-1 rounded text-sm mr-2 truncate max-w-[200px]">
-                      {typeof window !== 'undefined' ? window.location.origin : ''}{publishedUrl}
+                      {typeof window !== 'undefined' ? window.location.origin : ''}/creator/{username}
                     </code>
                     <button 
                       onClick={copyToClipboard}

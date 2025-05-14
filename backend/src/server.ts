@@ -1,26 +1,24 @@
-import userRoutes from './routes/userRoutes';
-import creatorRoutes from './routes/creatorRoutes';
-import messageRoutes from './routes/messageRoutes';
-import reviewRoutes from './routes/reviewRoutes';
-import uploadRoutes from './routes/uploadRoutes';
 import express from 'express';
-import path from 'path';
+import http from 'http';
+import { initializeSocketIO } from './sockets';
+import { SocketIOServer } from './types/socket';
 
-// API Routes
-const app = express();
-app.use('/api/users', userRoutes);
-app.use('/api/creators', creatorRoutes);
-app.use('/api/messages', messageRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/upload', uploadRoutes);
+/**
+ * This file is now just a helper module to create server instances.
+ * The actual server is now started directly from index.ts.
+ * 
+ * This file is kept for backward compatibility and potential testing purposes.
+ */
 
-// Serve static files from the uploads directory
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+export function createServer(app: express.Application): {
+  server: http.Server;
+  io: SocketIOServer;
+} {
+  // Create HTTP server from Express app
+  const server = http.createServer(app);
 
-// Set port and start server
-// const PORT = 5001; // Changed from 5000 to 5001
-const PORT = process.env.PORT || 5001;
+  // Initialize Socket.IO
+  const io = initializeSocketIO(server);
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+  return { server, io };
+}

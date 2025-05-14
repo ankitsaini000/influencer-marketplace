@@ -21,7 +21,7 @@ const tokenUtils_1 = require("../utils/tokenUtils");
 // @access  Public
 exports.registerUser = (0, express_async_handler_1.default)((req, res) => __awaiter(void 0, void 0, void 0, function* () {
     console.log('Register request received with body:', req.body);
-    const { email, password, fullName, username } = req.body;
+    const { email, password, fullName, username, role } = req.body;
     if (!email || !password || !fullName) {
         console.log('Missing required fields:', { email: !!email, password: !!password, fullName: !!fullName });
         res.status(400);
@@ -45,16 +45,18 @@ exports.registerUser = (0, express_async_handler_1.default)((req, res) => __awai
     }
     try {
         // Create new user
-        console.log('Creating new user with data:', { email, fullName, username });
+        console.log('Creating new user with data:', { email, fullName, username, role });
         const user = yield User_1.default.create({
             email,
             password,
             fullName,
             username,
+            // Ensure role is properly set according to what was provided
+            role: ['creator', 'client', 'brand'].includes(role) ? role : 'client',
         });
         if (user) {
             const token = (0, tokenUtils_1.generateToken)(user._id);
-            console.log('User created successfully:', { userId: user._id, email: user.email });
+            console.log('User created successfully:', { userId: user._id, email: user.email, role: user.role });
             res.status(201).json({
                 _id: user._id,
                 email: user.email,

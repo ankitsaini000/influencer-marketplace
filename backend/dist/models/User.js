@@ -50,75 +50,88 @@ const userSchema = new mongoose_1.Schema({
         required: [true, 'Email is required'],
         unique: true,
         lowercase: true,
-        trim: true
+        trim: true,
     },
-    password: {
+    passwordHash: {
         type: String,
         required: [true, 'Password is required'],
-        minlength: [6, 'Password must be at least 6 characters']
     },
     fullName: {
         type: String,
-        required: [true, 'Full name is required']
+        required: [true, 'Full name is required'],
     },
     username: {
         type: String,
         unique: true,
         sparse: true,
         trim: true,
-        match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores']
+        match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores'],
     },
     avatar: {
         type: String,
-        default: null
+        default: null,
     },
     role: {
         type: String,
-        enum: {
-            values: ['user', 'creator', 'admin'],
-            message: '{VALUE} is not a valid role'
-        },
-        default: 'user'
+        enum: ['client', 'creator', 'admin', 'brand'],
+        default: 'client',
+    },
+    isVerified: {
+        type: Boolean,
+        default: false,
+    },
+    verificationToken: String,
+    resetPasswordToken: String,
+    resetPasswordExpires: Date,
+    lastLogin: Date,
+    isActive: {
+        type: Boolean,
+        default: true,
     },
 }, {
-    timestamps: true
+    timestamps: true,
 });
-// Hash password before saving
+// Hash password before saving if modified
 userSchema.pre('save', function (next) {
     return __awaiter(this, void 0, void 0, function* () {
         const user = this;
-        // Only hash the password if it's modified or new
-        if (!user.isModified('password'))
+        if (!user.isModified('passwordHash'))
             return next();
         try {
-            // Generate a salt and hash the password
-            const hashedPassword = yield (0, bcrypt_1.hash)(user.password, 10);
-            user.password = hashedPassword;
+            const hashed = yield (0, bcrypt_1.hash)(user.passwordHash, 10);
+            user.passwordHash = hashed;
             next();
         }
-        catch (error) {
-            return next(error);
+        catch (err) {
+            next(err);
         }
     });
 });
-// Method to check if password is valid
+// Method to check password
 userSchema.methods.isValidPassword = function (password) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            return yield (0, bcrypt_1.compare)(password, this.password);
+            return yield (0, bcrypt_1.compare)(password, this.passwordHash);
         }
-        catch (error) {
-            console.error('Password validation error:', error);
+        catch (err) {
+            console.error('Password validation failed:', err);
             return false;
         }
     });
 };
-// Don't send the password back when converting to JSON
+// Remove sensitive fields from JSON response
 userSchema.set('toJSON', {
     transform: function (doc, ret) {
-        delete ret.password;
+        delete ret.passwordHash;
         return ret;
-    }
+    },
+});
+// Add this after your schema definition but before creating the model
+// This adds a virtual password field that sets the passwordHash
+userSchema.virtual('password')
+    .set(function (password) {
+    this.passwordHash = password;
+    // The pre-save hook will hash this before saving
 });
 const User = mongoose_1.default.model('User', userSchema);
 exports.default = User;

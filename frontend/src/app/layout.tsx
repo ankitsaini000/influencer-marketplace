@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "../context/AuthContext";
-import { Toaster } from 'react-hot-toast';
+import ClientProviders from "../components/ClientProviders";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -22,10 +21,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} antialiased`}>
-        <AuthProvider>
+        <ClientProviders>
           {children}
-          <Toaster position="top-center" />
-        </AuthProvider>
+        </ClientProviders>
       </body>
     </html>
   );

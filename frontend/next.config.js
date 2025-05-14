@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    domains: ['localhost', 'images.unsplash.com'],
+    domains: ['localhost', 'images.unsplash.com', 'i.pinimg.com', 'img.freepik.com', 'via.placeholder.com', 'cloudinary.com', 'res.cloudinary.com'],
   },
   // Add configuration to ignore Grammarly attributes
   compiler: {

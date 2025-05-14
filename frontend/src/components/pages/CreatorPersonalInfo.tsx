@@ -7,6 +7,8 @@ import { checkUsernameAvailability, createNewCreatorProfile } from "../../servic
 import debounce from "lodash/debounce";
 import { toast } from "react-hot-toast";
 import { OnboardingProgressBar } from '../OnboardingProgressBar';
+import { setCreatorStatus } from '../../services/creatorApi';
+import { useAuth } from '../../context/AuthContext';
 
 export const CreatorPersonalInfo = () => {
   const router = useRouter();
@@ -167,25 +169,76 @@ export const CreatorPersonalInfo = () => {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Check file size before processing (max 5MB)
-      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+      // Check file size before processing (max 2MB)
+      const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
       
       if (file.size > MAX_FILE_SIZE) {
-        toast.error(`Image too large (${(file.size / (1024 * 1024)).toFixed(2)}MB). Maximum size is 5MB.`);
+        toast.error(`Image too large (${(file.size / (1024 * 1024)).toFixed(2)}MB). Maximum size is 2MB.`);
         return;
       }
       
       const reader = new FileReader();
       reader.onloadend = () => {
         const result = reader.result as string;
-        // Check the base64 size as well
-        if (result && result.length > MAX_FILE_SIZE * 1.4) { // Base64 is ~1.33x larger
-          toast.error('Image too large after encoding. Please choose a smaller image.');
-          return;
-        }
-        setProfileImage(result);
+        
+        // Compress the image before setting it
+        compressAndSetImage(result);
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  // Helper function to compress images
+  const compressAndSetImage = async (base64Image: string) => {
+    try {
+      // Create an image to load the base64 string
+      const img = new Image();
+      img.onload = () => {
+        // Calculate new dimensions while maintaining aspect ratio
+        let width = img.width;
+        let height = img.height;
+        
+        // Limit maximum width to 600px
+        const maxWidth = 600;
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        
+        // Create canvas and draw resized image
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          toast.error('Could not process image');
+          return;
+        }
+        
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // Convert to base64 with reduced quality (JPEG at 70% quality)
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+        
+        // Check the final size
+        const estimatedSize = compressedBase64.length * 0.75; // Base64 is ~33% larger than binary
+        if (estimatedSize > 1 * 1024 * 1024) { // If still over 1MB
+          toast.error('Image is still large. This might cause storage issues.');
+        }
+        
+        // Set the compressed image
+        setProfileImage(compressedBase64);
+      };
+      
+      img.onerror = () => {
+        toast.error('Failed to load image');
+      };
+      
+      img.src = base64Image;
+    } catch (error) {
+      console.error('Error compressing image:', error);
+      toast.error('Could not process image');
     }
   };
 
@@ -224,19 +277,87 @@ export const CreatorPersonalInfo = () => {
     }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const validateForm = () => {
+    // Reset any previous errors
+    setError(null);
     
     // Ensure username is valid
     if (formData.username && !usernameStatus.available) {
       setError("Please choose an available username");
       toast.error("Username is not available. Please choose another one.");
-      return;
+      return false;
     }
     
     if (formData.username && !formData.username.match(/^[a-zA-Z0-9_]+$/)) {
       setError("Username can only contain letters, numbers, and underscores");
       toast.error("Invalid username format");
+      return false;
+    }
+    
+    return true;
+  };
+
+  const updateAuthData = (data: any) => {
+    // Simply update the localStorage directly
+    const userData = localStorage.getItem('user');
+    if (userData) {
+      try {
+        const parsedUser = JSON.parse(userData);
+        const updatedUser = {
+          ...parsedUser,
+          ...data
+        };
+        
+        try {
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+          console.log('Updated user data in localStorage:', updatedUser);
+        } catch (storageError: any) {
+          // Handle quota exceeded error
+          if (storageError.name === 'QuotaExceededError') {
+            console.warn('LocalStorage quota exceeded, attempting to free up space');
+            
+            // Try to free up space by removing non-essential data
+            try {
+              // Remove temporary data first
+              localStorage.removeItem('creatorProfileTemp');
+              localStorage.removeItem('tempData');
+              
+              // Try again with the update
+              localStorage.setItem('user', JSON.stringify(updatedUser));
+              console.log('Successfully updated user data after freeing space');
+            } catch (retryError) {
+              console.error('Still unable to save user data after freeing space:', retryError);
+              
+              // As a last resort, save only essential data
+              const minimalUserData = {
+                id: updatedUser.id,
+                username: updatedUser.username,
+                role: updatedUser.role,
+                profileImage: updatedUser.profileImage
+              };
+              
+              try {
+                localStorage.setItem('user', JSON.stringify(minimalUserData));
+                console.log('Saved minimal user data to localStorage');
+              } catch (finalError) {
+                console.error('Failed to save even minimal user data:', finalError);
+              }
+            }
+          } else {
+            // Re-throw if it's not a quota error
+            throw storageError;
+          }
+        }
+      } catch (e) {
+        console.error('Error updating user data:', e);
+      }
+    }
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    
+    if (!validateForm()) {
       return;
     }
     
@@ -244,77 +365,94 @@ export const CreatorPersonalInfo = () => {
     setError(null);
     
     try {
-      console.log("Submitting form data:", formData);
-
-      // Import the creator profile store
-      const { useCreatorProfileStore } = await import('../../store/creatorProfileStore');
-      const store = useCreatorProfileStore.getState();
+      // Format location as an object
+      const locationParts = formData.location.split(',').map(part => part.trim());
+      const locationData = {
+        city: locationParts[0] || '',
+        state: locationParts[1] || '',
+        country: locationParts[2] || '',
+        address: '',
+        postalCode: ''
+      };
       
-      // Update the store first
-      store.updateCurrentProfile('personalInfo', {
-        fullName: `${formData.firstName} ${formData.lastName}`.trim(),
-        username: formData.username,
-        location: formData.location,
-        profileImage: profileImage || '',
-        languages: formData.languages.map(lang => ({
-          language: lang.language,
-          proficiency: lang.level
-        })),
-        skills: []
-      });
-      
-      // Save to localStorage
-      store.saveToLocalStorage();
-      
-      // Also save to userData for easier access
-      localStorage.setItem('userData', JSON.stringify({
-        ...formData,
-        profileImage: profileImage
-      }));
-      
-      // We still need to make the API call for user creation/update
-      const response = await createNewCreatorProfile({
+      // Structure data according to backend schema
+      const profileData = {
         personalInfo: {
-          fullName: `${formData.firstName} ${formData.lastName}`.trim(),
-          location: formData.location,
-          profileImage: profileImage,
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          fullName: formData.fullName,
           username: formData.username,
-          yearsOfExperience: formData.yearsOfExperience
+          location: locationData,
+          languages: formData.languages.map(lang => ({
+            language: lang.language,
+            proficiency: lang.level
+          })),
+          profileImage: profileImage || ''
+        },
+        status: 'draft',
+        onboardingStep: 'personal-info',
+        completionStatus: {
+          personalInfo: true,
+          professionalInfo: false,
+          descriptionFaq: false,
+          socialMedia: false,
+          pricing: false,
+          galleryPortfolio: false
         }
-      });
+      };
+      
+      // Debug logging
+      console.log('🔍 Sending profile data:', JSON.stringify(profileData, null, 2));
+      
+      const response = await createNewCreatorProfile(profileData);
+      
+      // Debug logging
+      console.log('📥 Received response:', JSON.stringify(response, null, 2));
       
       if (response.success) {
-        toast.success('Personal info saved!');
-        
-        // Navigate to the next step
-        router.push('/creator-setup/professional-info');
-      } else {
-        toast.error(response.message || "Failed to save personal information");
-        setError(response.message || "Failed to save personal information");
-        
-        // Log more detailed error info for debugging
-        if (response.error) {
-          console.error("API Error Details:", response.error);
+        try {
+          // Update auth context with new data
+          updateAuthData({
+            username: formData.username,
+            profileImage: profileImage
+          });
+        } catch (localStorageError) {
+          console.warn('Failed to update localStorage, continuing with profile creation:', localStorageError);
+          // Continue with the process even if localStorage update fails
         }
         
-        // Let the user continue anyway if data is saved locally
-        setTimeout(() => {
-          toast.success("Continuing with locally saved data");
-          router.push('/creator-setup/professional-info');
-        }, 3000);
+        // Clear the registration flag
+        try {
+          localStorage.removeItem('just_registered');
+        } catch (e) {
+          console.warn('Failed to remove just_registered flag from localStorage:', e);
+        }
+        
+        // Show success message
+        toast.success('Profile created successfully!');
+        
+        // Debug logging - Check localStorage
+        try {
+          console.log('💾 Checking localStorage after save:');
+          console.log('creator_profile_exists:', localStorage.getItem('creator_profile_exists'));
+          console.log('userRole:', localStorage.getItem('userRole'));
+          console.log('username:', localStorage.getItem('username'));
+        } catch (e) {
+          console.warn('Failed to check localStorage after save:', e);
+        }
+        
+        // Redirect to the next step
+        router.push('/creator/professional-info');
       }
-    } catch (err: any) {
-      console.error("Error saving personal information:", err);
-      const errorMessage = err.message || "An error occurred while saving your data";
-      
-      toast.error(errorMessage);
-      setError(errorMessage);
-      
-      // Even on error, allow continuing to next page if data is saved locally
-      setTimeout(() => {
-        toast.success("Your data has been saved locally. You can continue.");
-        router.push('/creator-setup/professional-info');
-      }, 3000);
+    } catch (error: any) {
+      console.error('❌ Error creating profile:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      setError(error.message || 'Failed to create profile. Please try again.');
+      toast.error(error.message || 'Failed to create profile. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -494,8 +632,9 @@ export const CreatorPersonalInfo = () => {
                 value={formData.location}
                 onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
                 className="w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 transition-all"
-                placeholder="City, Country"
+                placeholder="City, State, Country"
               />
+              <p className="text-xs text-gray-500">Enter your location in the format: City, State, Country</p>
             </div>
 
             {/* Years of Experience */}

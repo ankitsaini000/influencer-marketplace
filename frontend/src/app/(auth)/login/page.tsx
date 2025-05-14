@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { authAPI, setCreatorStatus, setBrandStatus, getCreatorByUsername } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import FacebookLoginButton from '@/components/FacebookLoginButton';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -11,6 +12,23 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
+  const { login, isAuthenticated } = useAuth();
+  
+  // Prevent navigation to login page if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && typeof window !== 'undefined') {
+      const userRole = localStorage.getItem('userRole');
+      if (userRole === 'creator') {
+        router.push('/creator-dashboard');
+      } else if (userRole === 'brand') {
+        router.push('/brand-dashboard');
+      } else {
+        // If role is not set, default to brand dashboard
+        localStorage.setItem('userRole', 'brand');
+        router.push('/brand-dashboard');
+      }
+    }
+  }, [isAuthenticated, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,77 +42,42 @@ export default function LoginPage() {
     setLoading(true);
     
     try {
-      const response = await authAPI.login(email, password);
+      await login(email, password);
       
-      if (response && response.token) {
-        localStorage.setItem("token", response.token);
-        
-        if (response.user) {
-          localStorage.setItem("user", JSON.stringify(response.user));
-          
-          if (response.user.role === "creator") {
-            console.log("Creator account detected, setting up creator role");
-            
-            setCreatorStatus(false);
-            
-            let username = '';
-            
-            if (response.user.username) {
-              username = response.user.username;
-              localStorage.setItem("username", username);
-            } else if (response.user.name) {
-              username = response.user.name.toLowerCase().replace(/\s+/g, '_');
-              localStorage.setItem("username", username);
-              console.log(`Generated username: ${username} from name: ${response.user.name}`);
-            }
-            
-            if (username) {
-              try {
-                console.log(`Checking if profile exists for ${username}`);
-                const { data: creatorData } = await getCreatorByUsername(username);
-                
-                if (creatorData) {
-                  console.log("Creator profile found, marking as published");
-                  localStorage.setItem(`creator_${username}`, JSON.stringify(creatorData));
-                  localStorage.setItem('creator_profile_exists', 'true');
-                  localStorage.setItem('just_published', 'true');
-                } else {
-                  console.log("No profile data found - new creator account");
-                  localStorage.removeItem('creator_profile_exists');
-                  localStorage.removeItem('just_published');
-                }
-              } catch (profileError) {
-                console.error("Error checking creator profile:", profileError);
-                localStorage.removeItem('creator_profile_exists');
-                localStorage.removeItem('just_published');
-              }
-            }
-            
-            router.push("/creator-dashboard");
-            return;
-          } else if (response.user.role === "brand") {
-            console.log("Brand account detected");
-            setBrandStatus();
-            
-            if (response.user.name) {
-              localStorage.setItem("brandName", response.user.name);
-            }
-            
-            router.push("/brand-dashboard");
-            return;
-          }
+      // Force a slight delay to allow state updates to complete
+      setTimeout(() => {
+        // Redirection based on role in localStorage
+        const userRole = localStorage.getItem('userRole');
+        if (userRole === 'creator') {
+          router.push('/creator-dashboard');
+        } else if (userRole === 'brand') {
+          router.push('/brand-dashboard');
+        } else {
+          // If role is not set, default to brand dashboard
+          localStorage.setItem('userRole', 'brand');
+          router.push('/brand-dashboard');
         }
-        
-        router.push("/dashboard");
-      } else {
-        setError("Invalid login response");
-      }
+      }, 100);
     } catch (err: any) {
       console.error("Login error:", err);
-      setError(err.response?.data?.message || "Login failed. Please try again.");
+      
+      // Specific handling for network-related errors
+      if (err.message && (
+          err.message.includes('Failed to fetch') || 
+          err.message.includes('Network Error') ||
+          err.code === 'ERR_NETWORK' || 
+          err.code === 'ERR_CONNECTION_REFUSED')) {
+        setError("Cannot connect to the server. Please make sure the backend server is running.");
+      } else {
+        setError(err.response?.data?.message || err.message || "Login failed. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFacebookLoginError = (err: Error) => {
+    setError(err.message || "Facebook login failed. Please try again.");
   };
 
   return (
@@ -154,6 +137,19 @@ export default function LoginPage() {
             >
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
+          </div>
+          
+          <div className="flex items-center my-4">
+            <div className="flex-grow border-t border-gray-300"></div>
+            <span className="flex-shrink mx-4 text-gray-600">or</span>
+            <div className="flex-grow border-t border-gray-300"></div>
+          </div>
+          
+          <div>
+            <FacebookLoginButton 
+              className="w-full"
+              onLoginError={handleFacebookLoginError}
+            />
           </div>
           
           <div className="text-center">

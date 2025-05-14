@@ -1,121 +1,66 @@
 import express from 'express';
 import { protect, authorize } from '../middleware/auth';
+import * as creatorController from '../controllers/creatorController';
 import {
-  getCreators, 
-  getPublicCreatorProfile,
-  getProfileData,
-  savePersonalInfo,
-  saveBasicInfo,
-  savePricing,
-  saveDescription,
-  saveRequirements,
-  saveGallery,
-  saveSocialInfo,
-  getCompletionStatus,
-  publishProfile,
-  testCreator,
-  checkUsername,
-  forceCompleteProfile,
-  emergencyFixProfile,
-  debugProfileData,
-  upgradeToCreator,
-  getMyCreatorProfile,
-  updateCreatorProfile,
-  createCreatorProfile
-} from '../controllers/creatorController';
-import { CreatorProfile } from '../models/CreatorProfile';
+  getCreatorDashboard,
+  getCreatorProfileData,
+  updateCreatorMetrics,
+  updateSocialMediaFollowers
+} from '../controllers/creatorDashboardController';
 
 const router = express.Router();
 
 // Public routes
-router.get('/creators', getCreators);
-router.post('/test', testCreator);
-router.get('/check-username/:username', checkUsername);
-router.get('/profile/:username', getPublicCreatorProfile);
+router.get('/', creatorController.getPublishedCreators);
+router.get('/creators', creatorController.getCreators);
+router.get('/published', creatorController.getPublishedCreators);
+router.get('/creators/:username', creatorController.getPublicCreatorProfile);
+router.post('/test', creatorController.testCreator);
+router.get('/check-username/:username', creatorController.checkUsername);
 
-// Protected routes (authentication required)
-router.use(protect);
+// Profile creation routes (requires auth)
+router.post('/', protect, creatorController.createCreatorProfile);
+router.get('/profile-data', protect, creatorController.getProfileData);
+router.post('/upgrade-role', protect, creatorController.upgradeToCreator);
 
-// Routes that only need authentication
-router.get('/profile-data', getProfileData);
-router.get('/profile', getMyCreatorProfile);
-router.get('/completion-status', getCompletionStatus);
-router.post('/personal-info', savePersonalInfo);
-router.post('/overview', saveBasicInfo);
-router.post('/upgrade-role', upgradeToCreator);
-router.get('/debug-profile-data', debugProfileData);
-router.get('/force-complete', forceCompleteProfile);
+// Dashboard route
+router.get('/dashboard', protect, getCreatorDashboard);
+router.put('/metrics', protect, updateCreatorMetrics);
+router.put('/social-media-followers', protect, updateSocialMediaFollowers);
 
-// Admin-only routes
-router.post('/emergency-fix/:userId', authorize('admin'), emergencyFixProfile);
-
-// Basic creator routes (require creator role)
-router.post('/pricing', authorize('creator'), savePricing);
-router.post('/description', authorize('creator'), saveDescription);
-router.post('/requirements', authorize('creator'), saveRequirements);
-router.post('/gallery', authorize('creator'), saveGallery);
-router.post('/social-info', authorize('creator'), saveSocialInfo);
-router.post('/publish', authorize('creator'), publishProfile);
-
-// Creator profile routes
-router.post('/', createCreatorProfile);
-
-// If you specifically need the /profile-data endpoint, add it:
-router.post('/profile-data', async (req, res) => {
-  try {
-    // Log the request body for debugging
-    console.log('Received profile data:', req.body);
-    
-    // Create a new creator profile or update existing one
-    let creatorProfile;
-    
-    // Extract userId from request body or from authenticated user
-    const userId = req.user?._id || req.body.userId;
-    
-    if (!userId) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'User ID is required'
-      });
-    }
-    
-    // Check if profile exists
-    const existingProfile = await CreatorProfile.findOne({ userId });
-    
-    if (existingProfile) {
-      // Update existing profile
-      creatorProfile = await CreatorProfile.findOneAndUpdate(
-        { userId },
-        { ...req.body, userId },
-        { new: true, runValidators: true }
-      );
-    } else {
-      // Create new profile
-      creatorProfile = await CreatorProfile.create({
-        ...req.body,
-        userId
-      });
-    }
-    
-    if (!creatorProfile) {
-      return res.status(404).json({ success: false, message: 'Could not create or update profile' });
-    }
-    
-    res.status(201).json({
-      success: true,
-      data: creatorProfile
-    });
-  } catch (error) {
-    console.error('Error in /profile-data endpoint:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error processing profile data', 
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
+// Creator section update routes (requires creator role)
 router.route('/me')
-  .get(getMyCreatorProfile)
-  .put(updateCreatorProfile);
+  .get(protect, authorize('creator'), creatorController.getMyCreatorProfile)
+  .put(protect, authorize('creator'), creatorController.updateCreatorProfile);
+
+router.post('/personal-info', protect, authorize('creator'), creatorController.savePersonalInfo);
+router.post('/basic-info', protect, authorize('creator'), creatorController.saveBasicInfo);
+router.post('/professional-info', protect, authorize('creator'), creatorController.saveProfessionalInfo);
+router.post('/description', protect, authorize('creator'), creatorController.saveDescription);
+router.post('/social-info', protect, authorize('creator'), creatorController.saveSocialInfo);
+router.post('/pricing', protect, authorize('creator'), creatorController.savePricing);
+router.post('/requirements', protect, authorize('creator'), creatorController.saveRequirements);
+router.post('/gallery', protect, authorize('creator'), creatorController.saveGallery);
+router.post('/publish', protect, authorize('creator'), creatorController.publishProfile);
+router.put('/publish', protect, authorize('creator'), creatorController.publishProfile);
+router.get('/completion-status', protect, authorize('creator'), creatorController.getCompletionStatus);
+
+// Admin/Debug routes (should be restricted in production)
+router.post('/force-complete', protect, authorize('creator'), creatorController.forceCompleteProfile);
+router.post('/emergency-fix', protect, authorize('admin'), creatorController.emergencyFixProfile);
+router.get('/debug/:userId', protect, authorize('admin'), creatorController.debugProfileData);
+router.post('/test-gallery', protect, authorize('creator'), creatorController.testGalleryStorage);
+
+// Creator profile route for dashboard data
+router.get('/me/profile', protect, getCreatorProfileData);
+
+// Onboarding step routes
+// router.route('/personal-info').post(protect, creatorController.savePersonalInfo);
+// router.route('/professional-info').post(protect, creatorController.saveProfessionalInfo);
+// router.route('/description-faq').post(protect, creatorController.saveDescriptionFaq);
+// router.route('/social-info').post(protect, creatorController.saveSocialInfo);
+// router.route('/pricing').post(protect, creatorController.savePricing);
+// router.route('/gallery-portfolio').post(protect, creatorController.saveGalleryPortfolio);
+// router.route('/publish').post(protect, creatorController.publishCreatorProfile);
 
 export default router;

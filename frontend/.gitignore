@@ -5,10 +5,7 @@ node_modules/
 .next/
 
 # local environment variables
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+
 
 # log files
 npm-debug.log*

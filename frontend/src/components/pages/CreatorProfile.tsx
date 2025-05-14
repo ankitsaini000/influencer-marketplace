@@ -885,7 +885,15 @@ export const CreatorProfile = () => {
 
               {/* Action Buttons */}
               <div className="space-y-3">
-                <button className="w-full px-6 py-3 bg-purple-600 text-white rounded-full hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => {
+                    // Ensure we pass the string value of the selected package (basic, standard, premium)
+                    const packageTypeValue = selectedPackage.toString();
+                    window.location.href = `/checkout?packageType=${packageTypeValue}&creatorId=${params?.username || 'unknown'}`;
+                    console.log("Navigating to checkout with package:", packageTypeValue);
+                  }}
+                  className="w-full px-6 py-3 bg-purple-600 text-white rounded-full hover:bg-purple-700 transition-colors flex items-center justify-center gap-2"
+                >
                   Continue
                   <ArrowRight size={16} />
                 </button>
